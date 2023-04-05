@@ -15,7 +15,7 @@ void func(){
 }
 
 int main(){
-    Log::Instance()->init(0, "./log", ".log", 1); ; 
+    Log::Instance().init(0, "./log", ".log", 1); ; 
     std::unique_ptr<ThreadPool> threadPool = make_unique<ThreadPool>() ; 
     for(int i = 0 ; i < 100 ; ++i){
         // 无序打印 0 - 99 

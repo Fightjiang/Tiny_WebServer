@@ -1,6 +1,6 @@
 #ifndef THREAD_H
 #define THREAD_H
-#include "threadPoolCommon.h"
+#include "../Common.h"
 
 class Thread{
 private : 
@@ -18,9 +18,9 @@ private :
     friend class ThreadPool ;
 
 public:
-    explicit Thread(int type = THREAD_TYPE_SECONDARY) noexcept {
+    explicit Thread(const int type = TYPE_SECONDARY) noexcept {
         
-        type_ = (type == THREAD_TYPE_PRIMARY) ? THREAD_TYPE_PRIMARY : THREAD_TYPE_SECONDARY  ; 
+        type_ = (type == TYPE_PRIMARY) ? TYPE_PRIMARY : TYPE_SECONDARY  ; 
         is_running_ = false ;
         is_init_ = false ;
         is_starting = true ;
@@ -51,7 +51,7 @@ public:
         this->index_ = index ; 
         this->pool_task_queue_ = poolTaskQueue ;
         this->config_ = config ; 
-        if(this->type_ == THREAD_TYPE_SECONDARY) { 
+        if(this->type_ == TYPE_SECONDARY) { 
             this->cur_ttl_ = this->config_->secondary_thread_ttl_ ; 
         }
         this->thread_ = std::move(std::thread(&Thread::run , this)) ; 
@@ -64,7 +64,7 @@ public:
         // 自身队列有的话，先从自身队列拿，不用加锁
         // 线程池 总队列里拿任务，需要加锁
         // 主线程可以从自身队列中拿，辅助线程只能去线程池队列中拿
-        if(this->type_ == THREAD_TYPE_PRIMARY) {
+        if(this->type_ == TYPE_PRIMARY) {
             if(popTask(task) || popPoolTask(task)) {
                 runTask(task) ; 
             } else {

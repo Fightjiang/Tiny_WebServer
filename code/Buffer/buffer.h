@@ -57,7 +57,7 @@ public:
                 memcpy(this->buffer_.get() + buffer_used_size , str , len) ; 
                 this->startPos_ = 0 ; this->endPos_ = buffer_used_size + len; 
             }else { // 幂增扩容方式
-                while(this->bufferLen < len){
+                while(this->bufferLen < buffer_used_size + len){
                     this->bufferLen = this->bufferLen * 2 ; 
                 }
                 std::unique_ptr<char[]> tmpBuffer = std::make_unique<char[]>(this->bufferLen)  ;
@@ -84,7 +84,7 @@ public:
         this->startPos_ += len ; 
         return len ;
     }
-
+    // ReadFd 也就是将 Fd 中的数据写入到 Buffer 中
     ssize_t ReadFd(int fd , int *saveErrno){
         char* buff = new char[128 * 1024]; // 为什么设置怎么大，因为本环境下套接字缓冲区的默认大小为: 128 * 1024 
         struct iovec iov[2];
@@ -94,7 +94,7 @@ public:
         iov[0].iov_base = BufferEnd();
         iov[0].iov_len = writable;
         iov[1].iov_base = buff;
-        iov[1].iov_len = sizeof(buff);
+        iov[1].iov_len = 128 * 1024 ;
 
         const ssize_t len = readv(fd, iov, 2);
         if(len < 0) {
@@ -108,9 +108,12 @@ public:
         return len;
     }
 
-    void Retrieve(size_t len){
-        assert(len <= BufferUsedSize()) ; 
-        this->startPos_ += len ;
+    void Retrieve(size_t len){ 
+        if(len >= BufferUsedSize()){
+            clear() ; 
+        }else{
+            this->startPos_ += len ;
+        }
     }
 
     void RetrieveUntil(const char* end) {
@@ -118,7 +121,7 @@ public:
         Retrieve(end - BufferStart()) ; 
     }
 
-    void RetrieveAll() { 
+    void clear() { 
         memset(this->buffer_.get() , '\0' , this->bufferLen) ; 
         this->startPos_ = 0;
         this->endPos_   = 0;
@@ -126,7 +129,7 @@ public:
 
     std::string RetrieveAllToStr() {
         std::string str(BufferStart(), BufferUsedSize());
-        RetrieveAll();
+        clear();
         return str;
     }
 

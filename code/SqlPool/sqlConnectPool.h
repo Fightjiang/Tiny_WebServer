@@ -6,7 +6,7 @@
 #include <string>
 #include <semaphore.h> 
 #include "../Log/log.h"
-#include "../ThreadPool/threadPoolCommon.h"
+#include "../Common.h"
 
 // 主连接不能用队列，直接用 vector , 再加一个hashmap visit 来判断当前 SQL 是否在使用
 // 辅助连接采用队列,
@@ -23,7 +23,7 @@ private :
     std::mutex mtx_ ;                                                    // 互斥锁
     std::thread monitor_thread_ ;                                        // 监控线程(用于自动扩缩容机制)
 
-public : 
+private : 
     
     explicit SqlConnnectPool( const bool autoInit = true) noexcept : 
         secondary_Conn_(0) , is_close_(false) , is_monitor_(true) {
@@ -43,7 +43,13 @@ public :
     ~SqlConnnectPool() {
         this->ClosePool() ;
     }
-    
+
+public : 
+    static SqlConnnectPool& Instance() {
+        static SqlConnnectPool inst ; 
+        return inst ; 
+    }
+
     bool init(){
         assert(is_close_ == false) ; 
         for(int i = 0 ; i < config_.default_thread_size_ ; ++i){
@@ -201,12 +207,108 @@ public :
             if(secondary_ttl == 0 && queueEmpty(secondary_sqlConnectPool_) == false){ 
                 if(closeOneSqlConnect()){
                     LOG_INFO("close One Secondary SqlConnect Success") ; 
-                    this->secondary_Conn_-- ;       
+                    this->secondary_Conn_-- ;
+                    secondary_ttl = config_.secondary_thread_ttl_ ;        
                 }
             } 
         }
     }
+
+    static std::string queryPwd(const std::string &name , const std::pair<MYSQL* , int>& sql){
+        
+        const char* query = "SELECT password FROM user_info WHERE username = ?" ;
+        MYSQL *sqlconn = sql.first ; 
+        // 准备参数化查询
+        MYSQL_STMT *stmt = mysql_stmt_init(sqlconn) ; 
+        if (!stmt || mysql_stmt_prepare(stmt, query, strlen(query)) ) {
+            LOG_ERROR("Failed to prepare MySQL statement: %s", mysql_error(sqlconn)) ;
+            mysql_stmt_close(stmt);
+            return "" ; 
+        }
+        
+        // 绑定参数
+        MYSQL_BIND param[1];  
+        memset(param, 0, sizeof(param)); 
+        param[0].buffer_type = MYSQL_TYPE_STRING;
+        param[0].buffer = const_cast<char *>(name.c_str()) ;
+        param[0].buffer_length = name.size() ;
+        
+        if (mysql_stmt_bind_param(stmt, param) != 0) {
+            LOG_ERROR("Failed to bind MySQL statement parameters: %s" , mysql_stmt_error(stmt));
+            mysql_stmt_close(stmt); 
+            return "" ; 
+        }
+
+        // 执行查询
+        if (mysql_stmt_execute(stmt) != 0) {
+            LOG_ERROR("Failed to execute MySQL statement: %s" , mysql_stmt_error(stmt));
+            mysql_stmt_close(stmt); 
+            return "" ; 
+        }
+        
+        // 处理结果 
+        char password[50];
+        MYSQL_BIND result[1];  
+        memset(result, 0, sizeof(result)); 
+        result[0].buffer_type = MYSQL_TYPE_STRING;
+        result[0].buffer = password;
+        result[0].buffer_length = sizeof(password);
+
+        if (mysql_stmt_bind_result(stmt, result) != 0) {
+            LOG_ERROR("Failed to bind MySQL statement results: %s" , mysql_stmt_error(stmt));
+            mysql_stmt_close(stmt);
+            return "" ; 
+        }
+
+        if (mysql_stmt_fetch(stmt) != 0) {
+            mysql_stmt_close(stmt);
+            LOG_INFO("name isn't exists %s" , name.c_str());
+            return "" ; 
+        } 
+        mysql_stmt_close(stmt); 
+        return password ; 
+    }
     
+    static std::string insertUser(const std::string &name , const std::string &pwd , const std::pair<MYSQL* , int>& sql){
+        if(name.size() <= 0 || pwd.size() <= 0 || name.size() > 20 || pwd.size() > 32){
+            LOG_ERROR("name or password haven't been met: %s %s" , name.data() , pwd.data()) ;
+            return "" ; 
+        } 
+        const char* insert = "INSERT INTO user_info (username , password) VALUES (? , ?)" ;
+        MYSQL *sqlconn = sql.first ; 
+        // 准备参数化查询
+        MYSQL_STMT *stmt = mysql_stmt_init(sqlconn) ; 
+        if (!stmt || mysql_stmt_prepare(stmt, insert, strlen(insert)) ) {
+            LOG_ERROR("Failed to prepare MySQL statement: %s", mysql_error(sqlconn)) ;
+            mysql_stmt_close(stmt);
+            return "" ; 
+        }
+        // 绑定参数
+        MYSQL_BIND param[2];  
+        memset(param, 0, sizeof(param)); 
+        param[0].buffer_type = MYSQL_TYPE_STRING;
+        param[0].buffer = const_cast<char *>(name.data()) ;
+        param[0].buffer_length = name.size() ;
+
+        param[0].buffer_type = MYSQL_TYPE_STRING;
+        param[0].buffer = const_cast<char *>(pwd.data()) ;
+        param[0].buffer_length = pwd.size() ;
+
+        if (mysql_stmt_bind_param(stmt, param) != 0) {
+            LOG_ERROR("Failed to bind MySQL statement parameters: %s" , mysql_stmt_error(stmt));
+            mysql_stmt_close(stmt); 
+            return "" ; 
+        }
+
+        // 执行插入操作 
+        if (mysql_stmt_execute(stmt) != 0) {
+            LOG_ERROR("Failed to execute MySQL statement: %s" , mysql_stmt_error(stmt));
+            mysql_stmt_close(stmt); 
+            return "" ; 
+        }
+        mysql_stmt_close(stmt); 
+        return pwd ; 
+    }
 } ; 
 
 #endif

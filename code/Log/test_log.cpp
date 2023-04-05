@@ -4,8 +4,8 @@
 using namespace std ;
 // 测试单线程同步写
 void test_SyncWrite() {
-    Log *log = Log::Instance() ; 
-    log->init(0, "./log", ".log", 0);
+    Log& log = Log::Instance() ; 
+    log.init(0, "./log", ".log", 0);
     LOG_INFO("========== Server init ==========");
     LOG_INFO("LogSys level: %d", 0);
     LOG_INFO("Port:%d, Method: %s", 80, "SyncWrite");   
@@ -17,8 +17,8 @@ void test_SyncWrite() {
 
 // 测试单线程异步写
 void test_AsynWrite() { 
-    Log *log = Log::Instance() ; 
-    log->init(0, "./log", ".log", 1);
+    Log& log = Log::Instance() ; 
+    log.init(0, "./log", ".log", 1);
     LOG_INFO("========== Server init ==========");
     LOG_INFO("LogSys level: %d", 0);
     LOG_INFO("Port:%d, Method: %s", 80, "AsynWrite");  
@@ -30,8 +30,8 @@ void test_AsynWrite() {
 
 // 测试多线程同步写日志
 void test_MultiThread_SyncWrite() {
-    Log *log = Log::Instance() ; 
-    log->init(0, "./log", ".log", 0);
+    Log& log = Log::Instance() ; 
+    log.init(0, "./log", ".log", 0);
     LOG_INFO("========== Server init ==========");
     std::vector<std::thread> thVec ;
     for(int i = 0 ; i < 10 ; ++i){
@@ -53,8 +53,8 @@ void test_MultiThread_SyncWrite() {
 
 // 测试多线程异步写日志
 void test_MultiThread_AsynWrite() {
-    Log *log = Log::Instance() ; 
-    log->init(0, "./log", ".log", 1);
+    Log& log = Log::Instance() ; 
+    log.init(0, "./log", ".log", 1);
     LOG_INFO("========== Server init ==========");
     std::vector<std::thread> thVec ;
     for(int i = 0 ; i < 10 ; ++i){

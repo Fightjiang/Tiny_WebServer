@@ -13,15 +13,29 @@
 #include <sys/stat.h>         //mkdir  
 #include <assert.h>
 
+
+#define LOG_BASE(level, format, ...) \
+    do {\
+        Log& log = Log::Instance();\
+        if (log.IsOpen() && log.GetLevel() <= level) {\
+            log.write(level, format, ##__VA_ARGS__); \
+        }\
+    } while(0);
+
+#define LOG_DEBUG(format, ...) do {LOG_BASE(0, format, ##__VA_ARGS__)} while(0);
+#define LOG_INFO(format, ...) do {LOG_BASE(1, format, ##__VA_ARGS__)} while(0);
+#define LOG_WARN(format, ...) do {LOG_BASE(2, format, ##__VA_ARGS__)} while(0);
+#define LOG_ERROR(format, ...) do {LOG_BASE(3, format, ##__VA_ARGS__)} while(0);
+
 // 线程安全
 class Log {
 public:
-    static Log* Instance() {
+    static Log& Instance() {
         static Log inst ; 
-        return &inst ; 
+        return inst ; 
     }
 
-    void init(const int loglevel , const char* path = ".", const char* suffix =".log", const int maxQueueCapacity = 1024) {
+    void init(const int loglevel , const char* path = ".", const char* suffix =".log", const bool logWriteMethod = true) {
         
         if(this->isOpen_ == true) return ; 
         
@@ -49,8 +63,8 @@ public:
         assert(fp_ != nullptr);
         isOpen_ = true ; // 成功打开 
         
-        // 如果消息队列大于0，说明启用了异步写入log，那就要初始化异步写入所需的变量 
-        if(maxQueueCapacity > 0) {
+        // 是否启用异步写入log 
+        if(logWriteMethod) {
             this->isAsync_ = true;
             // 获取 writeThread_ 的 unique 智能指针 
             this->writeThread_ = std::make_unique<std::thread>(&Log::AsyncWrite_ , this);
@@ -105,7 +119,7 @@ public:
             this->que.push(std::move(tmpBuff)) ;
             condition_locker.notify_one() ; 
         }else {
-            fputs(tmpBuff.get(), fp_); 
+            fputs(tmpBuff.get(), fp_); fflush(fp_) ;
         }
     }
 
@@ -158,13 +172,14 @@ private:
         if(fp_) { 
             fflush(fp_); fclose(fp_);
         }
+        LOG_INFO("Server Close !!") ; 
     }
 
     void AsyncWrite_() {
         while(isOpen_){
             std::unique_lock<std::mutex> locker(conditional_mutex) ;
             if(!que.empty()){
-                fputs(que.front().get() , fp_) ; que.pop() ; 
+                fputs(que.front().get() , fp_) ; que.pop() ; fflush(fp_) ;
             }else {
                 condition_locker.wait(locker) ; 
             }
@@ -193,17 +208,5 @@ private:
     std::condition_variable condition_locker ; 
 };
 
-#define LOG_BASE(level, format, ...) \
-    do {\
-        Log* log = Log::Instance();\
-        if (log->IsOpen() && log->GetLevel() <= level) {\
-            log->write(level, format, ##__VA_ARGS__); \
-        }\
-    } while(0);
-
-#define LOG_DEBUG(format, ...) do {LOG_BASE(0, format, ##__VA_ARGS__)} while(0);
-#define LOG_INFO(format, ...) do {LOG_BASE(1, format, ##__VA_ARGS__)} while(0);
-#define LOG_WARN(format, ...) do {LOG_BASE(2, format, ##__VA_ARGS__)} while(0);
-#define LOG_ERROR(format, ...) do {LOG_BASE(3, format, ##__VA_ARGS__)} while(0);
 
 #endif //LOG_H

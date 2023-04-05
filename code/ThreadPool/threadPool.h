@@ -1,8 +1,8 @@
 #ifndef THREAD_POOL_H
 #define THREAD_POOL_H
 
-#include "threadPoolCommon.h"
-#include "Thread.h"
+#include "../Common.h"
+#include "thread.h"
 
 class ThreadPool {
 private :
@@ -20,19 +20,46 @@ private :
 
 public :
     explicit ThreadPool(const bool autoInit = true) noexcept {
-        // 创建监控线程
-        monitor_thread_ = std::move(std::thread(&ThreadPool::monitor , this)) ; 
         config_ = ThreadPoolConfigInfo() ;
         if(autoInit){
             if(this->init() == false){
                 LOG_ERROR("Thread Pool Create Fail !!!") ;
             } else {
                 LOG_INFO("Thread Pool Create Success !!!") ;
+                // 创建监控线程
+                monitor_thread_ = std::move(std::thread(&ThreadPool::monitor , this)) ; 
             }
         }
     }
 
     ~ThreadPool(){
+        ClosePool() ; // 关闭线程池
+    }
+
+    // 初始化线程池，并创建主线程
+    bool init() {
+        assert(is_init_ == false) ; 
+        this->thread_record_map_.clear() ; 
+        this->primary_threads_.reserve(config_.default_thread_size_) ; 
+
+        for(int i = 0 ; i < config_.default_thread_size_ ; ++i){
+            std::unique_ptr<Thread> ptr = std::make_unique<Thread>(TYPE_PRIMARY) ; 
+            if(ptr == nullptr){
+                LOG_ERROR("One Primary Thread Create Fail") ; 
+                return false ;
+            }
+            ptr->init(i , &task_queue_pool_ ,  &config_) ; 
+            // hash 线程 ID 号
+            thread_record_map_[std::hash<std::thread::id>()(ptr->thread_.get_id())]  = i ; 
+            primary_threads_.emplace_back(std::move(ptr)) ; 
+        } 
+        this->is_init_ = true ;
+        return true ;
+    }
+
+    void ClosePool(){
+        if(this->is_init_ == false) return ;
+        
         this->is_monitor_ = false ; // 先关闭监控线程
         if(this->monitor_thread_.joinable()){
             monitor_thread_.join() ; 
@@ -54,28 +81,7 @@ public :
         } 
         
     }
-
-    // 初始化线程池，并创建主线程
-    bool init() {
-        assert(is_init_ == false) ; 
-        this->thread_record_map_.clear() ; 
-        this->primary_threads_.reserve(config_.default_thread_size_) ; 
-
-        for(int i = 0 ; i < config_.default_thread_size_ ; ++i){
-            std::unique_ptr<Thread> ptr = std::make_unique<Thread>(THREAD_TYPE_PRIMARY) ; 
-            if(ptr == nullptr){
-                LOG_ERROR("One Primary Thread Create Fail") ; 
-                return false ;
-            }
-            ptr->init(i , &task_queue_pool_ ,  &config_) ; 
-            // hash 线程 ID 号
-            thread_record_map_[std::hash<std::thread::id>()(ptr->thread_.get_id())]  = i ; 
-            primary_threads_.emplace_back(std::move(ptr)) ; 
-        } 
-        this->is_init_ = true ;
-        return true ;
-    }
-
+    
     // 创建辅助线程
     bool createSecondaryThread(int size){
         int remainSize = static_cast<int>(config_.max_thread_size_ - config_.default_thread_size_ - secondary_threads_.size()) ; 
@@ -85,7 +91,7 @@ public :
             return true ;
         }
         for(int i = 0 ; i < realCreateSize ; ++i){
-            std::unique_ptr<Thread> ptr = std::make_unique<Thread>(THREAD_TYPE_SECONDARY) ; 
+            std::unique_ptr<Thread> ptr = std::make_unique<Thread>(TYPE_SECONDARY) ; 
             if(ptr == nullptr){
                 LOG_ERROR("One Secondary Thread Create Fail") ; 
                 return false; 
@@ -98,11 +104,6 @@ public :
 
     void monitor(){
         while(is_monitor_){
-
-            // 如果线程池没有初始化，则监控线程会一直处于空跑状态
-            while(is_monitor_ && is_init_ == false){
-                SLEEP_SECOND(2) ; 
-            }
             
             // 监控线程的执行间隔时间
             int span = config_.monitor_span_ ; 

@@ -13,6 +13,7 @@
 typedef std::function<void()> TimeoutCallBack;
 typedef std::chrono::system_clock Clock;
 typedef std::chrono::milliseconds MS;
+typedef std::chrono::seconds S ; 
 typedef Clock::time_point TimeStamp;
 
 struct TimerNode {
@@ -27,16 +28,19 @@ struct TimerNode {
 };
 
 class HeapTimer {
+private : 
+    std::vector<TimerNode> heap_;
+    std::unordered_map<int, size_t> ref_;
 public:
     HeapTimer() { heap_.reserve(64); }
 
     ~HeapTimer() { clear(); }
     
-    void adjust(int id, int newExpires) {
+    void adjust(const int id, const Clock::time_point newExpires) {
         // 调整堆 
         assert(!heap_.empty()) ; 
         assert((ref_.find(id) != ref_.end())) ;
-        heap_[ref_[id]].expires = Clock::now() + MS(newExpires) ; // Clock::now() 获得系统的当前时间， MS 毫秒 
+        heap_[ref_[id]].expires = newExpires ; // Clock::now() 获得系统的当前时间， MS 毫秒 
         
         // 调整堆
         if(shiftdown_(ref_[id] , heap_.size()) == false) {
@@ -110,8 +114,8 @@ private:
     void del_(size_t index) {
          
         assert(!heap_.empty() && index >= 0 && index < heap_.size());
-        size_t i = index ; 
-        size_t n = heap_.size() - 1 ; 
+        int i = index ; 
+        int n = heap_.size() - 1 ; 
         if(i < n){
             SwapNode_(i , n) ; 
             shiftdown_(i , n) ; 
@@ -121,10 +125,10 @@ private:
         heap_.pop_back();
     }
     
-    void shiftup_(size_t i) {
-        assert(i >= 0 && i < heap_.size());
-        size_t j = (i - 1) / 2; 
-        while(j >= 0) {
+    void shiftup_(int i) {
+        assert(i >= 0 && i < heap_.size()); 
+        int j = (i - 1) / 2; 
+        while(j >= 0 && i != 0) {
             if(heap_[j] < heap_[i]) { break; }
             SwapNode_(i, j) ;
             i = j ;
@@ -147,16 +151,13 @@ private:
         return i > index ; 
     }
 
-    void SwapNode_(size_t i, size_t j) {
+    void SwapNode_(int i, int j) {
         assert(i >= 0 && i < heap_.size());
         assert(j >= 0 && j < heap_.size());
         std::swap(heap_[i], heap_[j]);
         ref_[heap_[i].id] = i;
         ref_[heap_[j].id] = j;
     }
-
-    std::vector<TimerNode> heap_;
-    std::unordered_map<int, size_t> ref_;
 };
 
 #endif //HEAP_TIMER_H
