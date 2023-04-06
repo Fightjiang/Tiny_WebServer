@@ -32,8 +32,8 @@ private:
     char* mmFile_; 
     int iovCnt_;
     struct iovec iov_[2];
-    Buffer readBuff_; // 读缓冲区
-    Buffer writeBuff_; // 写缓冲区
+    std::unique_ptr<Buffer> readBuff_; // 读缓冲区
+    std::unique_ptr<Buffer> writeBuff_; // 写缓冲区
 
     enum PARSE_STATE {
         REQUEST_LINE,
@@ -67,8 +67,8 @@ public :
         fd_ = fd ; 
         addr_ = addr;
         srcDir_ = srcDir ; 
-        readBuff_.clear() ; 
-        writeBuff_.clear() ; 
+        readBuff_ = std::make_unique<Buffer>() ;
+        writeBuff_ = std::make_unique<Buffer>() ; 
     }
 
     void Close() {
@@ -76,7 +76,7 @@ public :
         if(mmFile_) {
             munmap(mmFile_, mmFileStat_.st_size);
             mmFile_ = nullptr;
-        } 
+        }
     }
 
     int GetFd() const {
@@ -113,10 +113,11 @@ public :
     
     bool paresRequestLine(){
         method_.clear() ; path_.clear() ; version_.clear() ;
-        const char* strBegin = readBuff_.BufferStart() ; 
-        int i = 0 , flag = 0 ; 
-        for(; i < readBuff_.BufferUsedSize() ; ++i) {
-            if(*(strBegin + i) == '\r' && *(strBegin + i + 1) == '\n') break ;
+        const char* strBegin = readBuff_->BufferStart() ; 
+        int i = 0 , flag = 0 , len = readBuff_->BufferUsedSize() ; 
+       // std::cout<<strBegin<<" "<<len<<std::endl ;
+        for(; i < len ; ++i) {
+            if((*(strBegin + i)) == '\r' && i + 1 < len &&  (*(strBegin + i + 1)) == '\n')  break ; 
             if(*(strBegin + i) == ' '){
                 ++flag ; continue ;
             }
@@ -124,8 +125,8 @@ public :
             if(flag == 1) path_.push_back(*(strBegin + i)) ; 
             if(flag == 2) version_.push_back(*(strBegin + i)) ; 
         }
-         
-        readBuff_.Retrieve(i + 2) ;
+        readBuff_->Retrieve(i + 2) ;
+       // std::cout<<"over"<<std::endl; 
         if(flag != 2) return false ;
         LOG_DEBUG("method: %s; path : %s; version: %s;" , method_.data() , path_.data() , version_.data()) ; 
         // 路径进一步处理
@@ -141,11 +142,12 @@ public :
     }
 
     bool paresHeader(){
-        const char* strBegin = readBuff_.BufferStart() ; 
-        int i = 0 , flag = 0 ; 
+        const char* strBegin = readBuff_->BufferStart() ; 
+        int i = 0 , flag = 0 , len = readBuff_->BufferUsedSize() ; 
+       // std::cout<<strBegin<<" "<<len<<std::endl ;
         std::string key , value ; 
-        for(; i < readBuff_.BufferUsedSize() ; ++i) {
-            if((*(strBegin + i)) == '\r' && (*(strBegin + i + 1)) == '\n') {
+        for(; i < len ; ++i) {
+            if((*(strBegin + i)) == '\r' && i + 1 < len &&  (*(strBegin + i + 1)) == '\n') {
                 break ;
             }
             if((*(strBegin + i)) == ':'){
@@ -154,7 +156,8 @@ public :
             if(flag == 0) key.push_back(*(strBegin + i)) ; 
             if(flag == 1) value.push_back(*(strBegin + i)) ;  
         }
-        readBuff_.Retrieve(i + 2) ;
+        readBuff_->Retrieve(i + 2) ;
+       // std::cout<<"over"<<std::endl ;
         if(flag == 0) {
             state_ = BODY ; return true ;
         }else if(key.size() == 0 || value.size() == 0){
@@ -188,8 +191,8 @@ public :
 
     bool ParseBody(){
         state_ = FINISH ; 
-        if(readBuff_.BufferRemainSize() <= 0) return true ; 
-        body_ = readBuff_.RetrieveAllToStr() ; 
+        if(readBuff_->BufferRemainSize() <= 0) return true ; 
+        body_ = readBuff_->RetrieveAllToStr() ; 
         // 如果是 urlencoded 则还需要解码步骤
         if(method_ == "POST" && header_["Content-Type"] == "application/x-www-form-urlencoded") {
             // 1. 字符"a"-"z"，"A"-"Z"，"0"-"9"，"."，"-"，"*"，和"_" 都不会被编码;
@@ -241,8 +244,8 @@ public :
 
     bool parseHttp(){
         
-        if(readBuff_.BufferUsedSize() <= 0) return false ;  
-        while(readBuff_.BufferUsedSize() && state_ != FINISH) {
+        if(readBuff_->BufferUsedSize() <= 0) return false ;  
+        while(readBuff_->BufferUsedSize() && state_ != FINISH) {
             switch (state_)
             {
             case REQUEST_LINE:
@@ -267,7 +270,7 @@ public :
         return true ;
     }
 
-    bool ErrorContent(Buffer& buff)  {
+    bool ErrorContent()  {
         std::string body; 
         body += "<html><title>Error</title>";
         body += "<body bgcolor=\"ffffff\">";
@@ -276,23 +279,23 @@ public :
         body += std::to_string(response_code_) + " : " + response_status_  + "\n";
         body += "<p>" + response_status_ + "</p>";
         body += "<hr><em>TinyWebServer</em></body></html>";
-        buff.Append("Content-length: " + std::to_string(body.size()) + "\r\n\r\n");
-        return buff.Append(body);
+        writeBuff_->Append("Content-length: " + std::to_string(body.size()) + "\r\n\r\n");
+        return writeBuff_->Append(body);
     }
 
     bool AddStateLine(){
-        return writeBuff_.Append("HTTP/1.1 " + std::to_string(response_code_) + " " + response_status_ + "\r\n") ; 
+        return writeBuff_->Append("HTTP/1.1 " + std::to_string(response_code_) + " " + response_status_ + "\r\n") ; 
     }
 
     bool AddHeader(){
-        writeBuff_.Append("Connection: ");
+        writeBuff_->Append("Connection: ");
         if(IsKeepAlive()) {
-            writeBuff_.Append("keep-alive\r\n");
-            writeBuff_.Append("keep-alive: max=6, timeout=120\r\n");
+            writeBuff_->Append("keep-alive\r\n");
+            writeBuff_->Append("keep-alive: max=6, timeout=120\r\n");
         } else{
-            writeBuff_.Append("close\r\n");
+            writeBuff_->Append("close\r\n");
         }
-        return writeBuff_.Append("Content-type: " + GetFileType_() + "\r\n");
+        return writeBuff_->Append("Content-type: " + GetFileType_() + "\r\n");
     }
 
     bool AddBody(){
@@ -323,7 +326,7 @@ public :
             LOG_ERROR("mmap file %s error %d !!!" ,  file_.data() , errno); 
             return false ; 
         }
-        writeBuff_.Append("Content-length: " + std::to_string(mmFileStat_.st_size) + "\r\n\r\n");
+        writeBuff_->Append("Content-length: " + std::to_string(mmFileStat_.st_size) + "\r\n\r\n");
         this->mmFile_ = dataFile ; 
         return true ;
     }
@@ -359,7 +362,7 @@ public :
             return false ; 
         }
         if(response_code_ == 400 || AddBody() == false) {
-            if(ErrorContent(writeBuff_)) {
+            if(ErrorContent()) {
                 LOG_WARN("%s %d server send ErrorContent success!!!" , path_.data() , response_code_) ;  
             }else {
                 LOG_ERROR("server add file content error !!!") ;  
@@ -368,8 +371,8 @@ public :
             // 不直接返回，因为 false 的时候会添加 ErrorContent 保底
         }
         // 响应头
-        iov_[0].iov_base = const_cast<char*> (writeBuff_.BufferStart()) ;
-        iov_[0].iov_len = writeBuff_.BufferUsedSize() ; 
+        iov_[0].iov_base = const_cast<char*> (writeBuff_->BufferStart()) ;
+        iov_[0].iov_len = writeBuff_->BufferUsedSize() ; 
         iovCnt_ = 1; 
         /* 文件 */
         if(mmFile_ != nullptr) {
@@ -385,14 +388,14 @@ public :
         int Errno = -1; 
         ssize_t len = -1;
         do {
-            len = readBuff_.ReadFd(fd_, &Errno);  
+            len = readBuff_->ReadFd(fd_, &Errno);  
             if (len <= 0) {
                 if(Errno == EWOULDBLOCK ){// 读完了，跳出
                     break ; 
                 }else if(Errno == EINTR) {// 被中断了，继续读
                     continue;
                 }else { // 对端关闭，或者 read 出错了
-                    LOG_ERROR("ReadRd Error") ;
+                    LOG_INFO("client already close") ;
                     return false ;
                 }
             }
@@ -414,7 +417,7 @@ public :
             len = writev(fd_ , iov_ , iovCnt_) ;  
             // std::cout<<"Write : "<<len<<" "<<errno<<" "<<iov_[0].iov_len<<std::endl ;
             if(len < 0){
-                if(errno == EWOULDBLOCK || errno == EINTR) {// EWOULDBLOCK 或者 被中断了，继续读
+                if(errno == EWOULDBLOCK || errno == EINTR) {// fd_缓冲区满了 EWOULDBLOCK 或者 被信号中断了，继续写，继续发送
                     continue;
                 }else { // 对端关闭,再写就会触发 SIGPIPE 信号 ，或者 Write 出错了
                     LOG_ERROR("Write FD Error") ;
@@ -426,7 +429,7 @@ public :
                     iov_[1].iov_len -= (len - iov_[0].iov_len);
                     iov_[0].iov_base = iov_[1].iov_base ; 
                     iov_[0].iov_len = iov_[1].iov_len ;
-                    writeBuff_.clear(); --iovCnt_ ; 
+                    writeBuff_->clear(); --iovCnt_ ; 
                 } else {
                     iov_[0].iov_base = (uint8_t*)iov_[0].iov_base + len; 
                     iov_[0].iov_len -= len; 

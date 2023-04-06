@@ -18,9 +18,8 @@ void test_parse_http(){
     int fd = open("./login.html", O_RDWR  | O_CREAT , 0644) ;   
     struct  sockaddr_in addr_ = {0} ; 
     httpconn->init(fd , "/home/lec/File/Tiny_ChatRoom/resources" ,  addr_ , false) ; 
-    int Erron = -1 ; 
-    httpconn->dealHttpRequest(&Erron) ;
-    httpconn->dealHttpResponse(&Erron) ; 
+    httpconn->dealHttpRequest() ;
+    httpconn->dealHttpResponse() ; 
 }
 
 int main(){

@@ -26,7 +26,7 @@ private :
      
     uint32_t listenEvent_;
     uint32_t connEvent_;
-    
+    std::mutex mtx ; 
     ThreadPoolConfigInfo config_ ; 
     std::unique_ptr<HeapTimer> timer_;
     std::unique_ptr<ThreadPool> threadpool_;
@@ -160,9 +160,6 @@ private:
             close(listenFd_);
             return false;
         }
-
-        // 设置为非阻塞
-        SetFdNonblock(listenFd_);
         LOG_INFO("Server IP: %s  port:%d", config_.server_IP , config_.server_port);
         return true;
     }
@@ -219,38 +216,14 @@ private:
                 users_[fd].init(fd, config_.srcDir , addr , connEvent_ |= EPOLLET);
                 if(config_.timeoutMS > 0) {// 小根堆，处理超时连接，绑定关闭的回调函数
                     timer_->add(fd, config_.timeoutMS , std::bind(&WebServer::CloseConn_, this , &users_[fd]));
+                    users_Expires[fd] = Clock::now() + std::chrono::seconds(config_.timeoutMS) ; 
                 }
                 epoller_->AddFd(fd, EPOLLIN | connEvent_);
-                SetFdNonblock(fd);
                 LOG_INFO("Client[%d](%s:%d) in, userCount:%d", fd, inet_ntoa(addr.sin_addr) , addr.sin_port , ++userCount);
             }
         } while(listenEvent_ & EPOLLET);
     }
     
-    void CloseConn_(HttpConn* client){
-        assert(client);
-        int fd = client->GetFd() ; 
-        LOG_INFO("Client[%d](%s:%d) out , userCount:%d", fd , client->GetIP(), client->GetPort(), --userCount) ; 
-        users_.erase(fd) ;
-        users_Expires.erase(fd) ;
-        epoller_->DelFd(fd);
-        client->Close(); 
-    }
-
-    void DealWrite_(HttpConn* client) {
-        assert(client); 
-        // 线程池处理写任务
-        threadpool_->commitTask(std::bind(&WebServer::OnWrite_, this, client));
-        users_Expires[client->GetFd()] = Clock::now() + std::chrono::seconds(config_.timeoutMS) ; 
-    }
-    
-    void DealRead_(HttpConn* client){
-        assert(client); 
-        // 线程池处理读任务
-        threadpool_->commitTask(std::bind(&WebServer::OnRead_, this, client));
-        users_Expires[client->GetFd()] = Clock::now() + std::chrono::seconds(config_.timeoutMS) ; 
-    }
- 
     void SendError_(int fd, const char*info) {
         assert(fd > 0) ; 
         int ret = send(fd , info , strlen(info) , 0) ; 
@@ -261,31 +234,55 @@ private:
         close(fd) ; 
     }
 
+    void CloseConn_(HttpConn* client){
+        assert(client);
+        int fd = client->GetFd() ; 
+        LOG_INFO("Client[%d](%s:%d) out , userCount:%d", fd , client->GetIP(), client->GetPort(), --userCount) ;   
+        users_.erase(fd) ;
+        if(config_.timeoutMS > 0){
+            users_Expires.erase(fd) ;
+        }
+        epoller_->DelFd(fd);
+    }
+
+    void DealWrite_(HttpConn* client) {
+        assert(client); 
+        // 线程池处理写任务
+        threadpool_->commitTask(std::bind(&WebServer::OnWrite_, this, client));
+        if(client->IsClose() ){
+            CloseConn_(client) ; return ;
+        }
+    }
+    
+    void DealRead_(HttpConn* client){
+        assert(client); 
+        // 线程池处理读任务
+        threadpool_->commitTask(std::bind(&WebServer::OnRead_, this, client));
+        if(client->IsClose()){
+            CloseConn_(client) ; return ; 
+        }
+        if(config_.timeoutMS > 0){
+            users_Expires[client->GetFd()] = Clock::now() + std::chrono::seconds(config_.timeoutMS) ; 
+        }
+    }
+
     // 读取客户端发送过来的消息
     void OnRead_(HttpConn* client) { 
         bool ret = client->dealHttpRequest();
-        if(ret == false){
-            CloseConn_(client) ; return ;
+        if(ret == false) { 
+            client->Close(); return ; 
         }
-        // 重置EPOLLONESHOT事件： 把 client 置于可写 EPOLLOUT ，发送 response ；
+        // 读完之后，同一个线程内重置EPOLLONESHOT事件： 把 client 置于可写 EPOLLOUT ，发送 response ；
         epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLOUT) ;
     }
 
     void OnWrite_(HttpConn* client) { 
         bool ret = client->dealHttpResponse() ;
-        if(ret == false){
-             CloseConn_(client); return ; 
+        if(ret == false || client->IsKeepAlive() == false){ 
+            client->Close();  return ;
         }
-        // 重置EPOLLONESHOT事件： 把 client 置于可写 EPOLLIN ，接受 http request ；
-        if(client->IsKeepAlive()) {
-            epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLIN);
-        }else { // 断开连接
-            CloseConn_(client);
-        }
-    }
-    static int SetFdNonblock(int fd) {
-        assert(fd > 0) ; 
-        return fcntl(fd, F_SETFL, fcntl(fd, F_GETFD, 0) | O_NONBLOCK);
+        // 写完之后，同一个线程内重置EPOLLONESHOT事件： 把 client 置于可写 EPOLLIN ，接受 http request ；
+        epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLIN);
     }
 };
 
