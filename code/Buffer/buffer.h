@@ -12,7 +12,7 @@
 // 线程不安全 Buffer
 class Buffer {
 public:
-    Buffer(int initBuffSize = 256) : buffer_(std::make_unique<char[]>(initBuffSize)) , startPos_(0) , endPos_(0) , bufferLen(initBuffSize) {
+    Buffer(const int initBuffSize = 256) : buffer_(std::make_unique<char[]>(initBuffSize)) , startPos_(0) , endPos_(0) , bufferLen(initBuffSize) {
          
     } 
     ~Buffer() = default;
@@ -136,8 +136,8 @@ public:
 private:
     
     std::unique_ptr<char[]> buffer_   ;
-    std::atomic<std::size_t> startPos_;
-    std::atomic<std::size_t> endPos_  ;
-    std::atomic<std::size_t> bufferLen ; 
+    size_t startPos_;
+    size_t endPos_  ;
+    size_t bufferLen ; 
 } ; 
 #endif //BUFFER_H

@@ -1,7 +1,7 @@
 #include "buffer.h"
 #include <iostream>  
 #include <fcntl.h>  
-
+#include <assert.h>
 using namespace std ; 
 
 void test_append_Str(){
@@ -15,6 +15,7 @@ void test_append_Str(){
     buff->Append(str3) ; 
 
     string str = buff->RetrieveAllToStr() ; 
+    assert(str == "Hello 1 WorldHello 2 WorldHello 3 World") ; 
     cout<<str<<endl ; 
 }
 
@@ -45,6 +46,7 @@ void test_readfile(){
     buff->Append(str3) ;
 
     str = buff->RetrieveAllToStr() ; 
+    assert(str == "Hello 1 WorldHello 2 WorldHello 3 World") ; 
     cout<<str<<endl ;  
 }
 
@@ -65,13 +67,13 @@ void test_writefile(){
     cout<<len1<<" "<<len2<<endl ;
 }
 int main(){
-    // test_append_Str() ; 
-    // test_readfile() ;
+    test_append_Str() ; 
+    test_readfile() ;
     // test_writefile() ;
-    char buff[2048] ; 
-    FILE* fd = fopen("./buffer_test.txt", "a");
-    strcpy(buff , "test\n\0") ;  
-    fputs(buff, fd);
-    fclose(fd) ; 
+    // char buff[2048] ; 
+    // FILE* fd = fopen("./buffer_test.txt", "a");
+    // strcpy(buff , "test\n\0") ;  
+    // fputs(buff, fd);
+    // fclose(fd) ; 
     return 0 ; 
 }
