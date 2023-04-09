@@ -54,11 +54,11 @@ public:
                 path_, sysTime->tm_year + 1900, sysTime->tm_mon + 1, sysTime->tm_mday, suffix_) ;
         //std::cout<<fileName<<std::endl ;
         toDay_ = sysTime->tm_mday;
-        fp_ = fopen(fileName, "a");
+        fp_ = fopen(fileName, "w+");
         // 如果未创建成功，说明没有对应的目录，创建目录
         if(fp_ == nullptr) {
             mkdir(path_, 0755);
-            fp_ = fopen(fileName, "a");
+            fp_ = fopen(fileName, "w+");
         } 
         assert(fp_ != nullptr);
         isOpen_ = true ; // 成功打开 

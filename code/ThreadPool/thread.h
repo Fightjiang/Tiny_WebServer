@@ -14,7 +14,7 @@ private :
     std::thread thread_ ;                             // 执行任务的线程
     atomicQueue<Task>* pool_task_queue_ ;             // 线程池的总任务队列
     std::queue<Task>  thread_task_queue_ ;                            // 本线程中的任务队列
-    ThreadPoolConfigInfo *config_ ; 
+    ConfigInfo *config_ ; 
     friend class ThreadPool ;
 
 public:
@@ -45,7 +45,7 @@ public:
 
     bool init(int index , 
               atomicQueue<Task> *poolTaskQueue , 
-              ThreadPoolConfigInfo* config) {
+              ConfigInfo* config) {
 
         if(is_init_ == true) return false ;
         this->index_ = index ; 

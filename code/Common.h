@@ -28,10 +28,10 @@
 
 typedef std::function<void()> Task ; 
 
-struct ThreadPoolConfigInfo{
-    int  default_thread_size_ = 8 ;                                  // 默认主线程个数
-    int  secondary_thread_size_ = 0 ;                                // 默认开启辅助线程个数
+struct ConfigInfo{
+    int  default_thread_size_ = 8 ;                                  // 默认开启主线程个数 
     int  max_thread_size_ = default_thread_size_ * 2 ;               // 最多线程个数
+    int  max_thread_queue_size = 10 ;                                // 单个线程里面任务数超过 10 个，则放入公共线程池给其他线程处理
     int  secondary_thread_ttl_  = 3 ;                                // 辅助线程 ttl , 单位为 s
     int  monitor_span_ = 3 ;                                         // 监控线程执行时间间隔，单位为 s
     bool fair_lock_enable_ = false ;                                 // 是否开启公平锁，则所有的任务都是从线程池的中获取。（非必要不建议开启，因为这样所有线程又要争抢一个任务了）
@@ -40,19 +40,23 @@ struct ThreadPoolConfigInfo{
     const char * mysql_user = "root" ;                               // 数据库账号
     const char * mysql_pwd = "root123" ;                             // 数据库密码
     const char * mysql_dbName = "chatroom" ;                         // 使用的 database
+    // const char *server_IP = "127.0.0.1" ;                        // 服务器 Ip  
     const char *server_IP = "172.19.103.50" ;                        // 服务器 Ip  
     int server_port = 8080 ;                                         // 服务器端口
-    const char *srcDir = "/home/lec/File/Tiny_ChatRoom/resources" ;  // 服务器文件所在的地址
-    int timeoutMS = 60 * 60 * 2 ;                                    // 是否超时断开不活跃连接
+    int timeoutMS =  60 * 60 * 2 ;                                    // 是否超时断开不活跃连接
     //int timeoutMS = -1 ;                                               // 是否超时断开不活跃连接
-    int server_max_fd = 4096 ;                                       // 服务器最大连接数量，因为我的 file fd 最大只有 4096                                              
+    int server_max_fd = 4000 ;                                       // 服务器最大连接数量，因为我的 file fd 最大只有 4096 ，再保留 96 个，可能用于其他用途，如 open                                              
     bool openLog = true ;                                            // 默认打开日志
-    int logLevel = 0 ;                                               // 日志信息全部记录
+    int logLevel = 0 ;                                               // 日志信息级别
+    bool logWriteMethod = false ;                                     // true 异步写入，false 同步写入
     bool optLinger = true ;                                          // 优雅关闭：close() 之后等待一定时间，等套接字发送缓冲区中的数据发送完成
     int trigMode = 3 ;                                               // 采用的触发模式，0 水平触发；1 客户端 ET 服务端 LT ; 2  客户端 LT 服务端 ET; 3 客户端 ET 服务端 ET ; default = 3 ; 
 }; 
 
 struct HttpConfigInfo { 
+    
+    const char *srcDir = "/home/lec/File/Tiny_ChatRoom/resources" ;  // 服务器文件所在的地址
+    
     std::unordered_map<std::string, std::string> SUFFIX_TYPE = {
         { ".html",  "text/html" },
         { ".xml",   "text/xml" },
@@ -87,7 +91,7 @@ struct HttpConfigInfo {
     };
     std::unordered_set<std::string> DEFAULT_HTML{
             "/index", "/register", "/login",
-             "/welcome", "/video", "/picture", 
+             "/chat", "/video", "/picture", 
     } ;
     std::unordered_map<std::string, int> DEFAULT_HTML_TAG {
             {"/register.html", 0}, {"/login.html", 1},  

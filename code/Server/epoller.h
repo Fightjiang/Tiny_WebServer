@@ -25,6 +25,8 @@ public:
         struct epoll_event ev ;
         ev.data.fd = fd ; 
         ev.events = events ; 
+         // 设置为非阻塞
+        SetFdNonblock(fd);
         return 0 == epoll_ctl(this->epollFd_ , EPOLL_CTL_ADD, fd, &ev);
     }
 
@@ -55,7 +57,11 @@ public:
         assert(i < events_.size() && i >= 0);
         return events_[i].events;
     }
-        
+    // 将文件描述符设置为非阻塞
+    static int SetFdNonblock(int fd) {
+        assert(fd > 0) ; 
+        return fcntl(fd, F_SETFL, fcntl(fd, F_GETFD, 0) | O_NONBLOCK);
+    }
 private:
     int epollFd_; 
     std::vector<struct epoll_event> events_;    

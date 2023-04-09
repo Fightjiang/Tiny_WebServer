@@ -10,17 +10,16 @@ private :
     bool is_monitor_ = true ;                                           // 是否需要监控（如果不开启，辅助线程策略将失效。默认开启）
     int  cur_index = 0 ;                                                // 用循环派送任务到不同的线程队列中
     size_t input_task_num_ = 0 ;                                        // 记录放入的任务的个数
-    ThreadPoolConfigInfo config_ ;                                      // 线程池配置信息
+    ConfigInfo config_ ;                                      // 线程池配置信息
     atomicQueue<Task> task_queue_pool_ ;                                // 改进使用无锁队列存放任务
     std::vector<std::unique_ptr<Thread>> primary_threads_ ;             // 记录所有主线程
     std::list<std::unique_ptr<Thread>> secondary_threads_ ;             // 记录所有的辅助线程
-    std::thread monitor_thread_ ;                                       // 监控线程(自动扩缩容机制)
-    std::unordered_map<size_t ,int> thread_record_map_ ;                // 线程记录的信息
+    std::thread monitor_thread_ ;                                       // 监控线程(自动扩缩容机制) 
     std::mutex mtx_ ;                                                   // 互斥锁，用于读取线程池中的任务队列
 
 public :
     explicit ThreadPool(const bool autoInit = true) noexcept {
-        config_ = ThreadPoolConfigInfo() ;
+        config_ = ConfigInfo() ;
         if(autoInit){
             if(this->init() == false){
                 LOG_ERROR("Thread Pool Create Fail !!!") ;
@@ -38,8 +37,7 @@ public :
 
     // 初始化线程池，并创建主线程
     bool init() {
-        assert(is_init_ == false) ; 
-        this->thread_record_map_.clear() ; 
+        assert(is_init_ == false) ;  
         this->primary_threads_.reserve(config_.default_thread_size_) ; 
 
         for(int i = 0 ; i < config_.default_thread_size_ ; ++i){
@@ -48,9 +46,7 @@ public :
                 LOG_ERROR("One Primary Thread Create Fail") ; 
                 return false ;
             }
-            ptr->init(i , &task_queue_pool_ ,  &config_) ; 
-            // hash 线程 ID 号
-            thread_record_map_[std::hash<std::thread::id>()(ptr->thread_.get_id())]  = i ; 
+            ptr->init(i , &task_queue_pool_ ,  &config_) ;  
             primary_threads_.emplace_back(std::move(ptr)) ; 
         } 
         this->is_init_ = true ;
@@ -74,7 +70,6 @@ public :
                 ptr->destroy() ; 
             }
             secondary_threads_.clear() ; 
-            thread_record_map_.clear() ; 
             this->is_init_ = false ; 
             LOG_INFO("Thread Pool Already deal %d tasks" , this->input_task_num_) ; 
             LOG_INFO("Thread Pool Close over") ; 
@@ -120,7 +115,7 @@ public :
                 }
             }
 
-            // 主线程都在忙碌，线程池中还有待完成的任务
+            // 主线程都在忙碌，公共线程池中还有待完成的任务，则开启辅助线程帮忙
             if(busy){
                 if(!task_queue_pool_.empty()){
                     if(createSecondaryThread(1) == false){
@@ -154,8 +149,7 @@ public :
     }
     
     // 这个派送任务的方式，后续我想实现改进的是，尽量把相同 fd 的任务派送到之前处理过 fd 的线程队列中
-    // 用一个 unordered_map 标记对应的线程ID即可，这样应该可以用到对应的线程缓存
-    // 另外如果一个线程队列的任务数达到了最大值，则添加到公共的线程池队列中，给其他线程去取
+    // 用一个 unordered_map 标记对应的线程ID即可，这样应该可以用到对应的线程缓存 
 
     int dispatch(const int originIndex = 0){ // 派发该任务到那个线程任务队列 或者 线程池队列中
         if(config_.fair_lock_enable_){
@@ -166,6 +160,10 @@ public :
             realIndex = this->cur_index++ ; 
             if(this->cur_index >= config_.default_thread_size_){
                 this->cur_index = 0 ; 
+            }
+            // 如果一个线程队列的任务数达到了最大值，则添加到公共的线程池队列中，给其他线程去取
+            if(primary_threads_[realIndex]->thread_task_queue_.size() >= config_.max_thread_queue_size){
+                return -1 ; 
             }
         } 
         return realIndex ; 

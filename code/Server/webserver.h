@@ -15,31 +15,31 @@
 #include "../Timer/heaptimer.h"
 #include "../SqlPool/sqlConnectPool.h"
 #include "../ThreadPool/threadPool.h" 
-#include "../Http/httpConn.h"
+#include "../Client/clientConn.h"
 #include "../Common.h"
 
 class WebServer {
 private : 
     bool isClose_  ;
     int  listenFd_ ;
-    int  userCount ; 
+    std::atomic<int> userCount ; 
      
     uint32_t listenEvent_;
     uint32_t connEvent_;
     std::mutex mtx ; 
-    ThreadPoolConfigInfo config_ ; 
+    ConfigInfo config_ ; 
     std::unique_ptr<HeapTimer> timer_;
     std::unique_ptr<ThreadPool> threadpool_;
     std::unique_ptr<Epoller> epoller_;
-    std::unordered_map<int, HttpConn> users_;
+    std::unordered_map<int, ClientConn> users_;
     std::unordered_map<int, Clock::time_point> users_Expires; //Clock::now() + MS(newExpires)
 
 public:
     WebServer() : isClose_(false){
-            config_ = ThreadPoolConfigInfo() ;
+            config_ = ConfigInfo() ;
             InitEventMode_(config_.trigMode);
             if(config_.openLog) {
-                Log::Instance().init(config_.logLevel, "./log", ".log", true);
+                Log::Instance().init(config_.logLevel, "./log", ".log", config_.logWriteMethod);
                 if(isClose_) { LOG_ERROR("========== Server init error!=========="); }
                 else {
                     LOG_INFO("========== Server init ==========");
@@ -47,8 +47,7 @@ public:
                     LOG_INFO("Listen Mode: %s, Conn Mode: %s",
                                     (listenEvent_ & EPOLLET ? "ET": "LT"),
                                     (connEvent_ & EPOLLET ? "ET": "LT"));
-                    LOG_INFO("LogSys level: %d", config_.logLevel);
-                    LOG_INFO("srcDir: %s", config_.srcDir);
+                    LOG_INFO("LogSys level: %d", config_.logLevel); 
                     LOG_INFO("SqlConnPool num: %d, ThreadPool num: %d", config_.default_thread_size_, config_.default_thread_size_);
                 }
             }
@@ -72,12 +71,8 @@ public:
         int timeMS = -1 ; // epoll wait timeout == -1 无事件将一直阻塞 
         if(isClose_ == false) { LOG_INFO("========== Server start =========="); }
         while(isClose_ == false){
-            // 定时器，等待 timeMS 时间后，必有一个连接事件到期
+            // 定时器，等待 timeMS 时间后，必有一个连接事件到期，如果期间它没有重新发生交互的话。
             if(config_.timeoutMS > 0) {
-                // 统一调节更新所有结点的过期时间
-                for(const auto &client : users_Expires) {
-                    timer_->adjust(client.first , client.second) ; 
-                }
                 timeMS = timer_->GetNextTick(); // 发生一次心跳
             }
             int eventCnt = epoller_->Wait(timeMS) ;
@@ -213,7 +208,7 @@ private:
             } 
             if(fd > 0){
                 // 添加客户端的 fd  
-                users_[fd].init(fd, config_.srcDir , addr , connEvent_ |= EPOLLET);
+                users_[fd].init(fd , addr , connEvent_ |= EPOLLET);
                 if(config_.timeoutMS > 0) {// 小根堆，处理超时连接，绑定关闭的回调函数
                     timer_->add(fd, config_.timeoutMS , std::bind(&WebServer::CloseConn_, this , &users_[fd]));
                     users_Expires[fd] = Clock::now() + std::chrono::seconds(config_.timeoutMS) ; 
@@ -234,10 +229,12 @@ private:
         close(fd) ; 
     }
 
-    void CloseConn_(HttpConn* client){
+    void CloseConn_(ClientConn* client){
         assert(client);
+        if(client->IsClose()) return ;
         int fd = client->GetFd() ; 
-        LOG_INFO("Client[%d](%s:%d) out , userCount:%d", fd , client->GetIP(), client->GetPort(), --userCount) ;   
+        client->Close() ; 
+        LOG_INFO("Client[%d](%s:%d) out , userCount:%d", client->GetFd() , client->GetIP(), client->GetPort(), --userCount) ;
         users_.erase(fd) ;
         if(config_.timeoutMS > 0){
             users_Expires.erase(fd) ;
@@ -245,44 +242,42 @@ private:
         epoller_->DelFd(fd);
     }
 
-    void DealWrite_(HttpConn* client) {
+    void DealWrite_(ClientConn* client) {
         assert(client); 
         // 线程池处理写任务
         threadpool_->commitTask(std::bind(&WebServer::OnWrite_, this, client));
-        if(client->IsClose() ){
-            CloseConn_(client) ; return ;
-        }
     }
     
-    void DealRead_(HttpConn* client){
+    void DealRead_(ClientConn* client){
         assert(client); 
         // 线程池处理读任务
         threadpool_->commitTask(std::bind(&WebServer::OnRead_, this, client));
-        if(client->IsClose()){
-            CloseConn_(client) ; return ; 
-        }
-        if(config_.timeoutMS > 0){
-            users_Expires[client->GetFd()] = Clock::now() + std::chrono::seconds(config_.timeoutMS) ; 
+        if(config_.timeoutMS > 0){ 
+            timer_->adjust(client->GetFd() , Clock::now() + std::chrono::seconds(config_.timeoutMS)) ; 
         }
     }
 
     // 读取客户端发送过来的消息
-    void OnRead_(HttpConn* client) { 
-        bool ret = client->dealHttpRequest();
+    void OnRead_(ClientConn* client) { 
+        bool ret = client->dealRequest();
         if(ret == false) { 
-            client->Close(); return ; 
+            LOG_INFO("Client[%d](%s:%d) out , userCount:%d", client->GetFd() , client->GetIP(), client->GetPort(), --userCount) ;
+            client->Close();  epoller_->DelFd(client->GetFd()); return ; 
         }
         // 读完之后，同一个线程内重置EPOLLONESHOT事件： 把 client 置于可写 EPOLLOUT ，发送 response ；
         epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLOUT) ;
     }
 
-    void OnWrite_(HttpConn* client) { 
-        bool ret = client->dealHttpResponse() ;
-        if(ret == false || client->IsKeepAlive() == false){ 
-            client->Close();  return ;
-        }
+    void OnWrite_(ClientConn* client) { 
+        int ret = client->dealResponse() ;
+        if(ret == 2) { // 数据没有写完，需要继续写 
+            epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLOUT) ; return ;
+        }else if(ret == 0 || client->IsKeepAlive() == false){ // 是否出错，或者关闭连接
+            LOG_INFO("Client[%d](%s:%d) out , userCount:%d", client->GetFd() , client->GetIP(), client->GetPort(), --userCount) ;
+            client->Close();  epoller_->DelFd(client->GetFd()); return ;
+        } 
         // 写完之后，同一个线程内重置EPOLLONESHOT事件： 把 client 置于可写 EPOLLIN ，接受 http request ；
-        epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLIN);
+        epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLIN); 
     }
 };
 

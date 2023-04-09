@@ -17,7 +17,7 @@ private :
     std::atomic<int> is_close_ ;                                                     // 是否关闭连接池，关闭了就不再允许取连接池了
     std::condition_variable condition_close_ ;                           // 关闭条件变量用于等待其他 SQL 用完放回队列中再统一回收
     std::condition_variable condition_getSQL_  ;                      // 读取条件变量用于队列的生产者消费者模型同步
-    ThreadPoolConfigInfo config_ ;                                       // 线程池配置信息
+    ConfigInfo config_ ;                                       // 线程池配置信息
     std::queue<std::pair<MYSQL* , int>> primary_sqlConnectPool_ ;       // SQL 主连接池
     std::queue<std::pair<MYSQL* , int>> secondary_sqlConnectPool_ ;     // SQL 辅助连接池
     std::mutex mtx_ ;                                                    // 互斥锁
@@ -28,7 +28,7 @@ private :
     explicit SqlConnnectPool( const bool autoInit = true) noexcept : 
         secondary_Conn_(0) , is_close_(false) , is_monitor_(true) {
         
-        config_ = ThreadPoolConfigInfo() ; 
+        config_ = ConfigInfo() ; 
         if(autoInit){
             if(this->init() == false){
                 LOG_ERROR("Sql Pool Create Fail !!!") ;

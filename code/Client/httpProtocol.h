@@ -1,40 +1,26 @@
-#ifndef HTTP_REQUEST_H
-#define HTTP_REQUEST_H
+#ifndef HTTP_PROTOCOL_H
+#define HTTP_PROTOCOL_H
 
-#include <sys/types.h>
-#include <sys/uio.h>     // readv/writev
-#include <arpa/inet.h>   // sockaddr_in
-#include <stdlib.h>      // atoi()
-#include <fcntl.h>       // open
-#include <unistd.h>      // close
-#include <sys/stat.h>    // stat
-#include <sys/mman.h>    // mmap, munmap
-#include <errno.h>      
-#include <regex>
-#include <unordered_map>
-#include <unordered_set>
 #include <string>
+#include <fcntl.h>       // open
+#include <sys/mman.h>    // mmap, munmap
 #include "../Buffer/buffer.h"
 #include "../Log/log.h"
-#include "../SqlPool/sqlConnectPool.h" 
 #include "../Common.h"
 
-class HttpConn {
-private:
-   
-    int fd_; 
-    struct  sockaddr_in addr_;
-    bool isET_ ; 
+class HttpProtocol{
+private : 
+    int fd_ ; 
+    int is_ET_ ; 
+    bool is_Close_ ; 
     int response_code_ ; 
-    std::string response_status_ ; 
-    const char *srcDir_ ; 
-    struct stat mmFileStat_;
-    char* mmFile_; 
-    int iovCnt_;
-    struct iovec iov_[2];
+    std::string response_status_ ;  
+    struct stat mmFileStat_ ;
+    char* mmFile_ ; 
+    int iovCnt_ ;
+    struct iovec* write_iov_  ;
     std::unique_ptr<Buffer> readBuff_; // 读缓冲区
     std::unique_ptr<Buffer> writeBuff_; // 写缓冲区
-
     enum PARSE_STATE {
         REQUEST_LINE,
         HEADERS,
@@ -42,53 +28,56 @@ private:
         FINISH,        
     };
     PARSE_STATE state_; // 处理 http 请求分析
-    
     std::string method_ , path_, version_, body_;
     std::unordered_map<std::string, std::string> header_;
     std::unordered_map<std::string, std::string> post_;
     HttpConfigInfo http_config_ ; 
+
 public : 
-
-    HttpConn() {
-        fd_ = -1 ; 
-        response_code_ = -1 ; 
-        mmFile_ = nullptr ;
-        mmFileStat_ = { 0 };
-        addr_ = { 0 };
+    HttpProtocol() {
         http_config_ = HttpConfigInfo() ;  
-    }
-
-    ~HttpConn() {
-        Close() ; 
-    } 
-    
-    void init(int fd , const char* srcDir , const sockaddr_in& addr , const bool isET = true){ 
-        isET_ = isET ; 
-        fd_ = fd ; 
-        addr_ = addr;
-        srcDir_ = srcDir ; 
-        readBuff_ = std::make_unique<Buffer>() ;
+        // 同一个连接里，buff 可以重复回收利用，减少内存分配次数
+        readBuff_ = std::make_unique<Buffer>() ; 
         writeBuff_ = std::make_unique<Buffer>() ; 
     }
 
-    void Close() {
-        close(fd_);  
-        if(mmFile_) {
+    ~HttpProtocol() {
+        close() ; 
+    }
+
+    void init(const int fd , const int isET){
+        fd_ = fd ; 
+        is_ET_ = isET ;
+        is_Close_ = false ;  
+        iovCnt_ = 0 ; 
+        write_iov_ = nullptr ; 
+        mmFile_ = nullptr ; 
+        mmFileStat_ = { 0 }; 
+    }
+
+    void close(){
+        if(is_Close_) return ;
+        is_Close_ = true ;
+        
+        method_.clear() ; path_.clear() ; version_.clear() ;
+        header_.clear() ; post_.clear() ; 
+        iovCnt_ = 0 ; 
+        if(mmFile_ != nullptr) {
             munmap(mmFile_, mmFileStat_.st_size);
             mmFile_ = nullptr;
         }
+        if(write_iov_ != nullptr) {
+            delete write_iov_ ; 
+            write_iov_ = nullptr ; 
+        }
     }
 
-    int GetFd() const {
-        return fd_;
-    } 
-
-    const char* GetIP() const{
-        return inet_ntoa(addr_.sin_addr);
+    struct iovec* get_write_iovecAddr() const{
+        return write_iov_ ; 
     }
 
-    int GetPort() const{
-        return addr_.sin_port;
+    int get_iovec_len() const {
+        return iovCnt_ ; 
     }
 
     bool IsKeepAlive() const {
@@ -96,6 +85,10 @@ public :
             return header_.find("Connection")->second == "keep-alive" || version_ >= "HTTP/1.1";
         }
         return false;
+    }
+
+    bool isUpgradeWebSocket() const {
+        return false ; 
     }
 
     std::string GetFileType_() {
@@ -110,12 +103,10 @@ public :
         }
         return "text/plain";
     }
-    
+
     bool paresRequestLine(){
-        method_.clear() ; path_.clear() ; version_.clear() ;
         const char* strBegin = readBuff_->BufferStart() ; 
-        int i = 0 , flag = 0 , len = readBuff_->BufferUsedSize() ; 
-       // std::cout<<strBegin<<" "<<len<<std::endl ;
+        int i = 0 , flag = 0 , len = readBuff_->BufferUsedSize() ;  
         for(; i < len ; ++i) {
             if((*(strBegin + i)) == '\r' && i + 1 < len &&  (*(strBegin + i + 1)) == '\n')  break ; 
             if(*(strBegin + i) == ' '){
@@ -125,8 +116,7 @@ public :
             if(flag == 1) path_.push_back(*(strBegin + i)) ; 
             if(flag == 2) version_.push_back(*(strBegin + i)) ; 
         }
-        readBuff_->Retrieve(i + 2) ;
-       // std::cout<<"over"<<std::endl; 
+        readBuff_->Retrieve(i + 2) ; 
         if(flag != 2) return false ;
         LOG_DEBUG("method: %s; path : %s; version: %s;" , method_.data() , path_.data() , version_.data()) ; 
         // 路径进一步处理
@@ -143,8 +133,7 @@ public :
 
     bool paresHeader(){
         const char* strBegin = readBuff_->BufferStart() ; 
-        int i = 0 , flag = 0 , len = readBuff_->BufferUsedSize() ; 
-       // std::cout<<strBegin<<" "<<len<<std::endl ;
+        int i = 0 , flag = 0 , len = readBuff_->BufferUsedSize() ;  
         std::string key , value ; 
         for(; i < len ; ++i) {
             if((*(strBegin + i)) == '\r' && i + 1 < len &&  (*(strBegin + i + 1)) == '\n') {
@@ -156,11 +145,10 @@ public :
             if(flag == 0) key.push_back(*(strBegin + i)) ; 
             if(flag == 1) value.push_back(*(strBegin + i)) ;  
         }
-        readBuff_->Retrieve(i + 2) ;
-       // std::cout<<"over"<<std::endl ;
+        readBuff_->Retrieve(i + 2) ;  
         if(flag == 0) {
-            state_ = BODY ; return true ;
-        }else if(key.size() == 0 || value.size() == 0){
+            this->state_ = BODY ; return true ;
+        }else if(value.size() == 0){
             return false ;
         }
         header_[key] = value ; 
@@ -168,39 +156,17 @@ public :
         return true ; 
     }
 
-    
-    // 用户认证
-    bool UserVerify(const std::string &name , const std::string &pwd) {
-        if(name.size() <= 0 || pwd.size() <= 0 || name.size() > 20 || pwd.size() > 32) return false ; 
-        
-        SqlConnnectPool& SqlPool = SqlConnnectPool::Instance() ;  
-        std::pair<MYSQL* , int> sql = SqlPool.getSqlconnect() ; 
-        std::string password = SqlConnnectPool::queryPwd(name , sql) ; 
-        // 用户不存在，则默认注册
-        if(password.size() == 0){
-            password = SqlConnnectPool::insertUser(name , pwd , sql) ;             
-        }
-        SqlPool.freeSqlconnect(sql) ; 
-        if(password == pwd){
-            LOG_DEBUG("name: %s , pwd: %s user verify pass" , name.data() , pwd.data()) ; 
-            return true ; 
-        } 
-        LOG_DEBUG("name: %s , pwd: %s user verify fail" , name.data() , pwd.data()) ; 
-        return false ;
-    }
-
-    bool ParseBody(){
+    bool ParseBody() {
         state_ = FINISH ; 
-        if(readBuff_->BufferRemainSize() <= 0) return true ; 
+        if(readBuff_->BufferUsedSize() <= 0) return true ; 
         body_ = readBuff_->RetrieveAllToStr() ; 
         // 如果是 urlencoded 则还需要解码步骤
-        if(method_ == "POST" && header_["Content-Type"] == "application/x-www-form-urlencoded") {
+        if(method_ == "POST") {
             // 1. 字符"a"-"z"，"A"-"Z"，"0"-"9"，"."，"-"，"*"，和"_" 都不会被编码;
             // 2. 将空格转换为加号 (+) ;
             // 3. 将非文本内容转换成"%xy"的形式,xy是两位16进制的数值;
             // 4. 在每个 name=value 对之间放置 & 符号。
-            std::function<void()> ParseFromUrlencoded = [&](){
-                if(body_.size() == 0) { return ; }
+            std::function<void()> ParseFromUrlencoded = [&](){ 
                 
                 auto ConverHex = [](const char ch) -> int {
                     if(ch >= 'A' && ch <= 'F') return ch -'A' + 10;
@@ -229,22 +195,14 @@ public :
                 }
             } ;
             ParseFromUrlencoded() ;
-            if(path_ == "/register.html" || path_ == "/login.html") {
-               // bool isLogin = (tag == 1) ;
-                if(UserVerify(post_["username"], post_["password"])) {
-                    path_ = "/welcome.html";
-                } else {
-                    path_ = "/error.html";
-                }
-            }
         }
         LOG_DEBUG("Body:%s, len:%d", body_.data(), body_.size());
         return true ;
     }
 
-    bool parseHttp(){
-        
+    bool parseHttpRequest() {
         if(readBuff_->BufferUsedSize() <= 0) return false ;  
+        state_ = REQUEST_LINE ; 
         while(readBuff_->BufferUsedSize() && state_ != FINISH) {
             switch (state_)
             {
@@ -266,23 +224,29 @@ public :
             default:
                 break;
             }
-        }
-        return true ;
+        } 
+        return true ; 
     }
-
-    bool ErrorContent()  {
-        std::string body; 
-        body += "<html><title>Error</title>";
-        body += "<body bgcolor=\"ffffff\">";
-        // response_code_ = 404; // 文件不存在
-        // response_status_ = "Not Found" ;  
-        body += std::to_string(response_code_) + " : " + response_status_  + "\n";
-        body += "<p>" + response_status_ + "</p>";
-        body += "<hr><em>TinyWebServer</em></body></html>";
-        writeBuff_->Append("Content-length: " + std::to_string(body.size()) + "\r\n\r\n");
-        return writeBuff_->Append(body);
+    // 需要根据请求头判断头文件是否读取完毕
+    bool dealHttpRequest(){ 
+        int Errno = -1; 
+        ssize_t len = -1;
+        do {
+            len = readBuff_->ReadFd(fd_, &Errno);   
+            if (len <= 0) {
+                if(Errno == EWOULDBLOCK ){// 读完了，跳出
+                    break ; 
+                }else if(Errno == EINTR) {// 被中断了，继续读
+                    continue;
+                }else { // 对端关闭，或者 read 出错了
+                    LOG_INFO("client already close or Error!") ;
+                    return false ;
+                }
+            }
+        }while (is_ET_) ;
+        return parseHttpRequest() ; 
     }
-
+    
     bool AddStateLine(){
         return writeBuff_->Append("HTTP/1.1 " + std::to_string(response_code_) + " " + response_status_ + "\r\n") ; 
     }
@@ -299,7 +263,7 @@ public :
     }
 
     bool AddBody(){
-        std::string file_ = srcDir_ + path_ ; 
+        std::string file_ = http_config_.srcDir + path_ ; 
         bool file_exist = stat(file_.data() , &mmFileStat_) == 0 ;
         if(!file_exist || S_ISDIR(mmFileStat_.st_mode)) { 
             LOG_ERROR("file %s not exist!!!" , file_.data()); 
@@ -331,16 +295,26 @@ public :
         return true ;
     }
 
-    bool makeResponse(int numStatus){
+    bool makeHttpResponse(const int numStatus){
+        
         /* 判断请求的资源文件 */
         if(numStatus == 200){
-            if(stat((srcDir_ + path_).data(), &mmFileStat_) < 0 || S_ISDIR(mmFileStat_.st_mode)) { 
-                LOG_WARN("requests file %s Not Found" , (srcDir_ + path_).data()) ; 
+            // 判断是否是用户登录请求
+            if(path_ == "/login.html" || path_ == "/register.html") { 
+                if(UserVerify(post_["username"], post_["password"])) {
+                    path_ = "/chat.html";
+                } else {
+                    path_ = "/error.html";
+                }
+            }
+            std::string filePath = http_config_.srcDir + path_ ;  
+            if(stat(filePath.data(), &mmFileStat_) < 0 || S_ISDIR(mmFileStat_.st_mode)) { 
+                LOG_WARN("requests file %s Not Found" , filePath.data()) ; 
                 response_code_ = 404; // 文件不存在
                 response_status_ = "File Not Found" ; 
                 path_ = "/404.html"; 
             }else if(!(mmFileStat_.st_mode & S_IROTH)) {
-                LOG_WARN("requests file %s Forbidden" , (srcDir_ + path_).data()) ; 
+                LOG_WARN("requests file %s Forbidden" , filePath.data()) ; 
                 response_code_ = 403; // 没有权限访问
                 response_status_ = "Forbidden" ; 
                 path_ = "/403.html"; 
@@ -351,8 +325,7 @@ public :
         }else {
             response_code_ = 400; // 客户端请求错误
             response_status_ = "Bad Request" ; 
-        }
-        
+        } 
         if(AddStateLine() == false ){
             LOG_ERROR("server add state line error !!!") ; 
             return false ; 
@@ -360,86 +333,104 @@ public :
         if(AddHeader() == false){
             LOG_ERROR("server add header error !!!") ; 
             return false ; 
-        }
+        } 
         if(response_code_ == 400 || AddBody() == false) {
+             
+            auto ErrorContent = [&]() -> bool {
+                std::string body; 
+                body += "<html><title>Error</title>";
+                body += "<body bgcolor=\"ffffff\">";
+                // response_code_ = 404; // 文件不存在
+                // response_status_ = "Not Found" ;  
+                body += std::to_string(response_code_) + " : " + response_status_  + "\n";
+                body += "<p>" + response_status_ + "</p>";
+                body += "<hr><em>TinyWebServer</em></body></html>";
+                writeBuff_->Append("Content-length: " + std::to_string(body.size()) + "\r\n\r\n");
+                return writeBuff_->Append(body);
+            } ; 
+
             if(ErrorContent()) {
                 LOG_WARN("%s %d server send ErrorContent success!!!" , path_.data() , response_code_) ;  
             }else {
                 LOG_ERROR("server add file content error !!!") ;  
                 return false ;
+            } 
+        }
+        // 响应头文件内容信息
+        if(mmFile_ == nullptr){
+            write_iov_ = new iovec[1] ; 
+            if(write_iov_ == nullptr) {
+                LOG_ERROR("write iov new Fail") ; 
+                close() ; return false ;
             }
-            // 不直接返回，因为 false 的时候会添加 ErrorContent 保底
+            write_iov_[0].iov_base = const_cast<char*> (writeBuff_->BufferStart()) ;
+            write_iov_[0].iov_len = writeBuff_->BufferUsedSize() ; 
+            iovCnt_ = 1 ; 
+        }else {
+            write_iov_ = new iovec[2] ; 
+            if(write_iov_ == nullptr) {
+                LOG_ERROR("write iov new Fail") ; 
+                close() ; return false ;
+            }
+            write_iov_[0].iov_base = const_cast<char*> (writeBuff_->BufferStart()) ;
+            write_iov_[0].iov_len = writeBuff_->BufferUsedSize() ; 
+            /* mmap 文件 */
+            write_iov_[1].iov_base = mmFile_ ;
+            write_iov_[1].iov_len = mmFileStat_.st_size ;
+            iovCnt_ = 2 ;
         }
-        // 响应头
-        iov_[0].iov_base = const_cast<char*> (writeBuff_->BufferStart()) ;
-        iov_[0].iov_len = writeBuff_->BufferUsedSize() ; 
-        iovCnt_ = 1; 
-        /* 文件 */
-        if(mmFile_ != nullptr) {
-            iov_[1].iov_base = mmFile_ ;
-            iov_[1].iov_len = mmFileStat_.st_size ;
-            iovCnt_ = 2;
-        }
-        
         return true ; 
     }
-    
-    bool dealHttpRequest() {
-        int Errno = -1; 
-        ssize_t len = -1;
-        do {
-            len = readBuff_->ReadFd(fd_, &Errno);  
-            if (len <= 0) {
-                if(Errno == EWOULDBLOCK ){// 读完了，跳出
-                    break ; 
-                }else if(Errno == EINTR) {// 被中断了，继续读
-                    continue;
-                }else { // 对端关闭，或者 read 出错了
-                    LOG_INFO("client already close") ;
-                    return false ;
-                }
-            }
-        }while (isET_) ;
-        
-        this->state_ = REQUEST_LINE ; 
-        bool ret = parseHttp() ; // 处理 Http 请求的信息
-        // 成功处理完毕，发送 Http 响应信息 
-        if(ret == true){
-           return makeResponse(200) ; 
-        }// http 解析错误，客户端请求报文错误
-        return makeResponse(400) ;   
-    }
 
-    bool dealHttpResponse() {
-        // std::cout<<"file :"<<path_<<" size = "<<mmFileStat_.st_size<<std::endl ;
+    int dealHttpResponse() {   
         ssize_t len = -1 ; 
         do{
-            len = writev(fd_ , iov_ , iovCnt_) ;  
-            // std::cout<<"Write : "<<len<<" "<<errno<<" "<<iov_[0].iov_len<<std::endl ;
+            len = writev(fd_ , write_iov_ , iovCnt_) ;   
             if(len < 0){
-                if(errno == EWOULDBLOCK || errno == EINTR) {// fd_缓冲区满了 EWOULDBLOCK 或者 被信号中断了，继续写，继续发送
-                    continue;
-                }else { // 对端关闭,再写就会触发 SIGPIPE 信号 ，或者 Write 出错了
+                if(errno == EWOULDBLOCK) {// fd_缓冲区满了 EWOULDBLOCK 或者 被信号中断了，继续写，继续发送
+                    return 2 ; 
+                }else if(errno == EINTR){
+                    continue ; 
+                } else { // 对端关闭,再写就会触发 SIGPIPE 信号 ，或者 Write 出错了
                     LOG_ERROR("Write FD Error") ;
-                    return false ;
+                    close(); return 0 ;
                 }
             }else {
-                if(static_cast<size_t>(len) > iov_[0].iov_len){
-                    iov_[1].iov_base = (uint8_t*) iov_[1].iov_base + (len - iov_[0].iov_len);
-                    iov_[1].iov_len -= (len - iov_[0].iov_len);
-                    iov_[0].iov_base = iov_[1].iov_base ; 
-                    iov_[0].iov_len = iov_[1].iov_len ;
+                if(static_cast<size_t>(len) > write_iov_[0].iov_len){
+                    write_iov_[1].iov_base = (uint8_t*) write_iov_[1].iov_base + (len - write_iov_[0].iov_len);
+                    write_iov_[1].iov_len -= (len - write_iov_[0].iov_len);
+                    write_iov_[0].iov_base = write_iov_[1].iov_base ; 
+                    write_iov_[0].iov_len = write_iov_[1].iov_len ;
                     writeBuff_->clear(); --iovCnt_ ; 
                 } else {
-                    iov_[0].iov_base = (uint8_t*)iov_[0].iov_base + len; 
-                    iov_[0].iov_len -= len; 
+                    write_iov_[0].iov_base = (uint8_t*)write_iov_[0].iov_base + len; 
+                    write_iov_[0].iov_len -= len; 
                 }
             }
-            if((iov_[0].iov_len <= 0)) { // 传输完成
-                return true ; 
+            if((write_iov_[0].iov_len <= 0)) { // 传输完成 , 本次 http 请求应答结束，故关闭
+                return 1 ;
             } 
-        }while(isET_) ;
-        return true ;
+        }while(is_ET_) ; 
+    }
+    
+    // 用户认证
+    bool UserVerify(const std::string &name , const std::string &pwd) {
+        if(name.size() <= 0 || pwd.size() <= 0 || name.size() > 20 || pwd.size() > 32) return false ; 
+        
+        SqlConnnectPool& SqlPool = SqlConnnectPool::Instance() ;  
+        std::pair<MYSQL* , int> sql = SqlPool.getSqlconnect() ; 
+        std::string password = SqlConnnectPool::queryPwd(name , sql) ; 
+        // 用户不存在，则默认注册
+        if(password.size() == 0){
+            password = SqlConnnectPool::insertUser(name , pwd , sql) ;             
+        }
+        SqlPool.freeSqlconnect(sql) ; 
+        if(password == pwd){
+            LOG_DEBUG("name: %s , pwd: %s user verify pass" , name.data() , pwd.data()) ; 
+            return true ; 
+        } 
+        LOG_DEBUG("name: %s , pwd: %s user verify fail" , name.data() , pwd.data()) ; 
+        return false ;
     }
 } ; 
 
