@@ -50,9 +50,8 @@ public:
         assert(str != nullptr);
         // 不够，则需要扩容，指数扩容
         if(this->endPos_ + len >= this->bufferLen){
-            // 总容量是够的，则重新整理 buffer 空间
             size_t buffer_used_size = BufferUsedSize() ; 
-            if(buffer_used_size + len < this->bufferLen) {
+            if(buffer_used_size + len < this->bufferLen) { // Buffer 总容量是够的，但是重新整理 buffer 空间
                 memcpy(this->buffer_.get() , this->buffer_.get() + this->startPos_ , buffer_used_size) ; 
                 memcpy(this->buffer_.get() + buffer_used_size , str , len) ; 
                 this->startPos_ = 0 ; this->endPos_ = buffer_used_size + len; 
@@ -122,7 +121,7 @@ public:
     }
 
     void clear() { 
-        memset(this->buffer_.get() , '\0' , this->bufferLen) ; 
+        // memset(this->buffer_.get() , '\0' , this->bufferLen) ; 
         this->startPos_ = 0;
         this->endPos_   = 0;
     }

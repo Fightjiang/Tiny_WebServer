@@ -270,7 +270,7 @@ public :
     }
     
     static std::string insertUser(const std::string &name , const std::string &pwd , const std::pair<MYSQL* , int>& sql){
-        if(name.size() <= 0 || pwd.size() <= 0 || name.size() > 20 || pwd.size() > 32){
+        if(name.size() <= 0 || pwd.size() <= 6 || name.size() > 20 || pwd.size() > 32){
             LOG_ERROR("name or password haven't been met: %s %s" , name.data() , pwd.data()) ;
             return "" ; 
         } 

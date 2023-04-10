@@ -90,8 +90,8 @@ struct HttpConfigInfo {
         { 404, "/404.html" },
     };
     std::unordered_set<std::string> DEFAULT_HTML{
-            "/index", "/register", "/login",
-             "/chat", "/video", "/picture", 
+            "/index", "/register", "/login", "/welcome"
+             "/chat", "/video", "/picture", "/websocket"
     } ;
     std::unordered_map<std::string, int> DEFAULT_HTML_TAG {
             {"/register.html", 0}, {"/login.html", 1},  
