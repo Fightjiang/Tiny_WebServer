@@ -7,6 +7,7 @@
 #include "../Buffer/buffer.h"
 #include "../Log/log.h"
 #include "../Common.h"
+#include "../SqlPool/sqlConnectPool.h"
 
 class HttpProtocol{
 private : 
@@ -19,46 +20,47 @@ private :
     char* mmFile_ ; 
     int iovCnt_ ;
     struct iovec* write_iov_  ;
-    std::unique_ptr<Buffer> readBuff_; // 读缓冲区
-    std::unique_ptr<Buffer> writeBuff_; // 写缓冲区
+    Buffer* readBuff_;                      // 读缓冲区
+    Buffer* writeBuff_;                     // 写缓冲区
     enum PARSE_STATE {
         REQUEST_LINE,
         HEADERS,
         BODY,
         FINISH,        
     };
-    PARSE_STATE state_; // 处理 http 请求分析
-    std::string method_ , path_, version_, body_;
+    PARSE_STATE status_; // 处理 http 请求分析
+    std::string method_ , path_, version_ ;
     std::unordered_map<std::string, std::string> header_;
     std::unordered_map<std::string, std::string> post_;
     HttpConfigInfo http_config_ ; 
 
 public : 
-    HttpProtocol() {
+    HttpProtocol(Buffer* read , Buffer* write , const int fd , const int isET) {
         http_config_ = HttpConfigInfo() ;  
-        // 同一个连接里，buff 可以重复回收利用，减少内存分配次数
-        readBuff_ = std::make_unique<Buffer>() ; 
-        writeBuff_ = std::make_unique<Buffer>() ; 
+        fd_ = fd ; 
+        is_ET_ = isET ;
+        readBuff_ = read ; 
+        writeBuff_ = write ; 
     }
 
     ~HttpProtocol() {
         close() ; 
     }
 
-    void init(const int fd , const int isET){
-        fd_ = fd ; 
-        is_ET_ = isET ;
+    void init(){
+        readBuff_->clear() ; 
+        writeBuff_->clear() ; 
         is_Close_ = false ;  
         iovCnt_ = 0 ; 
         write_iov_ = nullptr ; 
         mmFile_ = nullptr ; 
         mmFileStat_ = { 0 }; 
+        
     }
 
     void close(){
         if(is_Close_) return ;
-        is_Close_ = true ;
-        
+        is_Close_ = true ; 
         method_.clear() ; path_.clear() ; version_.clear() ;
         header_.clear() ; post_.clear() ; 
         iovCnt_ = 0 ; 
@@ -72,6 +74,12 @@ public :
         }
     }
 
+    std::string get_WebSocket_key() const {
+        if(header_.find("Sec-WebSocket-Key") != header_.end()){
+            return header_.find("Sec-WebSocket-Key")->second ; 
+        }
+        return "" ;  
+    }
     struct iovec* get_write_iovecAddr() const{
         return write_iov_ ; 
     }
@@ -81,13 +89,21 @@ public :
     }
 
     bool IsKeepAlive() const {
-        if(header_.count("Connection") == 1) {
+        if(header_.find("Connection") != header_.end()) {
             return header_.find("Connection")->second == "keep-alive" || version_ >= "HTTP/1.1";
         }
         return false;
     }
 
     bool isUpgradeWebSocket() const {
+        if(header_.find("Connection") != header_.end() && 
+            header_.find("Upgrade") != header_.end() && 
+            header_.find("Sec-WebSocket-Key") != header_.end() ) {
+
+            return header_.find("Connection")->second == "keep-Upgrade" || 
+                    header_.find("Upgrade")->second == "websocket" ; 
+        
+        }
         return false ; 
     }
 
@@ -127,7 +143,7 @@ public :
                 path_ = path_ + ".html" ; 
             } 
         }
-        this->state_ = HEADERS ; 
+        this->status_ = HEADERS ; 
         return true ; 
     }
 
@@ -147,7 +163,7 @@ public :
         }
         readBuff_->Retrieve(i + 2) ;  
         if(flag == 0) {
-            this->state_ = BODY ; return true ;
+            this->status_ = BODY ; return true ;
         }else if(value.size() == 0){
             return false ;
         }
@@ -157,9 +173,15 @@ public :
     }
 
     bool ParseBody() {
-        state_ = FINISH ; 
-        if(readBuff_->BufferUsedSize() <= 0) return true ; 
-        body_ = readBuff_->RetrieveAllToStr() ; 
+        status_ = FINISH ; 
+        if(header_.find("Content-Length") == header_.end()) return true ; 
+        // body 数据包不完整
+        if(readBuff_->BufferUsedSize() < stol(header_["Content-Length"])) return false ; 
+
+        //body_ = readBuff_->RetrieveAllToStr() ; 
+        const char* strBegin = readBuff_->BufferStart() ; 
+        size_t len = stol(header_["Content-Length"]) ; 
+
         // 如果是 urlencoded 则还需要解码步骤
         if(method_ == "POST") {
             // 1. 字符"a"-"z"，"A"-"Z"，"0"-"9"，"."，"-"，"*"，和"_" 都不会被编码;
@@ -174,20 +196,20 @@ public :
                     return ch - '0' ;
                 } ; 
                 std::string key, value ;
-                for(int i = 0 , flag = 1 ; i <= body_.size() ; ++i){ 
-                    if(i == body_.size() || body_[i] == '&' || body_[i] == '=') {
-                        if(i == body_.size() || body_[i] == '&'){
+                for(int i = 0 , flag = 1 ; i <= len ; ++i){ 
+                    if(i == len || strBegin[i] == '&' || strBegin[i] == '=') {
+                        if(i == len || strBegin[i] == '&'){
                             post_[key] = value ; 
                             LOG_DEBUG("Post key:%s, value:%s", key.data(), value.data());
                             key.clear() ; value.clear() ;
                         }
                         flag *= -1 ; continue ; 
                     } 
-                    char ch = body_[i] ;
+                    char ch = *(strBegin + i) ;
                     if(ch == '+'){
                         ch = ' ' ; 
                     }else if(ch == '%'){
-                        ch = static_cast<char>(ConverHex(body_[i + 1]) * 16 + ConverHex(body_[i + 2])) ; 
+                        ch = static_cast<char>(ConverHex(*(strBegin + i + 1)) * 16 + ConverHex(*(strBegin + i + 2))) ; 
                         i += 2 ;
                     } 
                     if(flag == 1) key.push_back(ch) ; 
@@ -196,15 +218,16 @@ public :
             } ;
             ParseFromUrlencoded() ;
         }
-        LOG_DEBUG("Body:%s, len:%d", body_.data(), body_.size());
+        readBuff_->Retrieve(len) ;  
+        LOG_DEBUG("Body:%s, len:%d", std::string(strBegin , len).data() , len);
         return true ;
     }
 
     bool parseHttpRequest() {
         if(readBuff_->BufferUsedSize() <= 0) return false ;  
-        state_ = REQUEST_LINE ; 
-        while(readBuff_->BufferUsedSize() && state_ != FINISH) {
-            switch (state_)
+        status_ = REQUEST_LINE ; 
+        while(readBuff_->BufferUsedSize() && status_ != FINISH) {
+            switch (status_)
             {
             case REQUEST_LINE:
                 if(!paresRequestLine()){
@@ -228,22 +251,24 @@ public :
         return true ; 
     }
     // 需要根据请求头判断头文件是否读取完毕
-    bool dealHttpRequest(){ 
-        int Errno = -1; 
-        ssize_t len = -1;
-        do {
-            len = readBuff_->ReadFd(fd_, &Errno);   
-            if (len <= 0) {
-                if(Errno == EWOULDBLOCK ){// 读完了，跳出
-                    break ; 
-                }else if(Errno == EINTR) {// 被中断了，继续读
-                    continue;
-                }else { // 对端关闭，或者 read 出错了
-                    LOG_INFO("client already close or Error!") ;
-                    return false ;
+    bool dealHttpRequest(const int needRead = true){ 
+        if(needRead == true){
+            int Errno = -1; 
+            ssize_t len = -1;
+            do {
+                len = readBuff_->ReadFd(fd_, &Errno);  
+                if (len <= 0) {
+                    if(Errno == EWOULDBLOCK ){// 读完了，跳出
+                        break ; 
+                    }else if(Errno == EINTR) {// 被中断了，继续读
+                        continue;
+                    }else { // 对端关闭，或者 read 出错了
+                        LOG_INFO("client already close or Error!") ;
+                        return false ;
+                    }
                 }
-            }
-        }while (is_ET_) ;
+            }while (is_ET_) ;
+        }
         return parseHttpRequest() ; 
     }
     
@@ -290,19 +315,18 @@ public :
             LOG_ERROR("mmap file %s error %d !!!" ,  file_.data() , errno); 
             return false ; 
         }
-        writeBuff_->Append("Content-length: " + std::to_string(mmFileStat_.st_size) + "\r\n\r\n");
+        writeBuff_->Append("Content-Length: " + std::to_string(mmFileStat_.st_size) + "\r\n\r\n");
         this->mmFile_ = dataFile ; 
         return true ;
     }
 
     bool makeHttpResponse(const int numStatus){
-        
         /* 判断请求的资源文件 */
         if(numStatus == 200){
             // 判断是否是用户登录请求
-            if(path_ == "/login.html" || path_ == "/register.html") { 
+            if(method_ == "POST" && (path_ == "/login.html" || path_ == "/register.html") ) { 
                 if(UserVerify(post_["username"], post_["password"])) {
-                    path_ = "/chat.html";
+                    path_ = "/welcome.html";
                 } else {
                     path_ = "/error.html";
                 }
@@ -345,7 +369,7 @@ public :
                 body += std::to_string(response_code_) + " : " + response_status_  + "\n";
                 body += "<p>" + response_status_ + "</p>";
                 body += "<hr><em>TinyWebServer</em></body></html>";
-                writeBuff_->Append("Content-length: " + std::to_string(body.size()) + "\r\n\r\n");
+                writeBuff_->Append("Content-Length: " + std::to_string(body.size()) + "\r\n\r\n");
                 return writeBuff_->Append(body);
             } ; 
 
