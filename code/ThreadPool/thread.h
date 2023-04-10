@@ -13,7 +13,7 @@ private :
     bool is_init_    ;                                // 该线程是否已经进行了初始化
     std::thread thread_ ;                             // 执行任务的线程
     atomicQueue<Task>* pool_task_queue_ ;             // 线程池的总任务队列
-    std::queue<Task>  thread_task_queue_ ;                            // 本线程中的任务队列
+    atomicQueue<Task>  thread_task_queue_ ;            // 本线程中的任务队列
     ConfigInfo *config_ ; 
     friend class ThreadPool ;
 
@@ -82,11 +82,7 @@ public:
 
     // 自身的任务队列
     bool popTask(Task& task){
-        if(!thread_task_queue_.empty()){
-            task = std::move(thread_task_queue_.front()) ; thread_task_queue_.pop() ;
-            return true ;
-        }
-        return false ;
+        return thread_task_queue_.tryPop(task) ; 
     }
     
     // 从线程池的大任务队列中拿任务

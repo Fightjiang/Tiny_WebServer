@@ -10,7 +10,7 @@ private :
     bool is_monitor_ = true ;                                           // 是否需要监控（如果不开启，辅助线程策略将失效。默认开启）
     int  cur_index = 0 ;                                                // 用循环派送任务到不同的线程队列中
     size_t input_task_num_ = 0 ;                                        // 记录放入的任务的个数
-    ConfigInfo config_ ;                                      // 线程池配置信息
+    ConfigInfo config_ ;                                                // 线程池配置信息
     atomicQueue<Task> task_queue_pool_ ;                                // 改进使用无锁队列存放任务
     std::vector<std::unique_ptr<Thread>> primary_threads_ ;             // 记录所有主线程
     std::list<std::unique_ptr<Thread>> secondary_threads_ ;             // 记录所有的辅助线程
