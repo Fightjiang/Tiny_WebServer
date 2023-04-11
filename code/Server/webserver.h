@@ -31,8 +31,7 @@ private :
     std::unique_ptr<HeapTimer> timer_;
     std::unique_ptr<ThreadPool> threadpool_;
     std::unique_ptr<Epoller> epoller_;
-    std::unordered_map<int, ClientConn> users_;
-    std::unordered_map<int, Clock::time_point> users_Expires; //Clock::now() + MS(newExpires)
+    std::unordered_map<int, ClientConn> users_; 
 
 public:
     WebServer() : isClose_(false){
@@ -210,8 +209,7 @@ private:
                 // 添加客户端的 fd  
                 users_[fd].init(fd , addr , connEvent_ |= EPOLLET);
                 if(config_.timeoutMS > 0) {// 小根堆，处理超时连接，绑定关闭的回调函数
-                    timer_->add(fd, config_.timeoutMS , std::bind(&WebServer::CloseConn_, this , &users_[fd]));
-                    users_Expires[fd] = Clock::now() + std::chrono::seconds(config_.timeoutMS) ; 
+                    timer_->add(fd, config_.timeoutMS , std::bind(&WebServer::CloseConn_, this , &users_[fd])); 
                 }
                 epoller_->AddFd(fd, EPOLLIN | connEvent_);
                 LOG_INFO("Client[%d](%s:%d) in, userCount:%d", fd, inet_ntoa(addr.sin_addr) , addr.sin_port , ++userCount);
@@ -235,10 +233,7 @@ private:
         int fd = client->GetFd() ; 
         client->Close() ; 
         LOG_INFO("Client[%d](%s:%d) out , userCount:%d", client->GetFd() , client->GetIP(), client->GetPort(), --userCount) ;
-        users_.erase(fd) ;
-        if(config_.timeoutMS > 0){
-            users_Expires.erase(fd) ;
-        }
+        users_.erase(fd) ; 
         epoller_->DelFd(fd);
     }
 
