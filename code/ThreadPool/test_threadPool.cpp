@@ -15,16 +15,16 @@ void func(){
 }
 
 int main(){
-    Log::Instance().init(0, "./log", ".log", 1); ; 
+    Log::Instance().init(0, "./log", ".log", 0); ; 
     std::unique_ptr<ThreadPool> threadPool = make_unique<ThreadPool>() ; 
     for(int i = 0 ; i < 100 ; ++i){
         // 无序打印 0 - 99 
         threadPool->commitTask(std::bind(print , i)) ; // 默认放到每个线程自己的队列中
     }
 
-    for(int i = 0 ; i < 10 ; ++i){// 应该会创建辅助两个线程帮忙，是否创建可以看日志
+    for(int i = 0 ; i < 8 ; ++i){// 应该会创建辅助 4 个线程帮忙，是否创建可以看日志 , 注意把批量取任务设置为 1 
         threadPool->commitTask(std::bind(func) , -1) ; 
     }
-    SLEEP_SECOND(50) ; // 监控线程每 3s 才检查一次，这里阻塞是为了检查辅助线程是否退出
+    SLEEP_SECOND(50) ; // 监控线程每 3s 才检查一次，这里阻塞是为了检查辅助线程是否会退出
     return 0 ;
 }

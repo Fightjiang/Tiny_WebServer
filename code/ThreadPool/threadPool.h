@@ -110,7 +110,7 @@ public :
             bool busy = true ;
             for(const auto& thread : primary_threads_){
                 if(thread != nullptr){
-                    busy = busy & thread->is_running_ ; 
+                    busy = busy & thread->is_busy_ ; 
                     if(busy == false) break ;
                 }
             }
@@ -141,16 +141,28 @@ public :
     void commitTask(const Task &task , const int originIndex = 0){
         int realIndex = dispatch(originIndex) ; 
         if(realIndex >= 0 && realIndex < config_.default_thread_size_){
+
             primary_threads_[realIndex]->thread_task_queue_.push(std::move(task)) ;
+            if(primary_threads_[realIndex]->is_busy_ == false){ // 唤醒该线程，继续干活了 
+                primary_threads_[realIndex]->condition_.notify_one() ;  
+            }
+        
         }else {
+            // 公共队列中有任务，尝试唤醒一个空闲的主工作线程
             this->task_queue_pool_.push(std::move(task)) ; 
+            for(int i = 0 ; i < config_.default_thread_size_ ; ++i){
+                if(primary_threads_[i]->is_busy_ == false){
+                    // 唤醒该线程，继续干活了 
+                    primary_threads_[i]->condition_.notify_one() ; 
+                    break ; 
+                }
+            }
+            
         }
         input_task_num_++ ; // 计数
     }
     
-    // 这个派送任务的方式，后续我想实现改进的是，尽量把相同 fd 的任务派送到之前处理过 fd 的线程队列中
-    // 用一个 unordered_map 标记对应的线程ID即可，这样应该可以用到对应的线程缓存 
-
+    // 这个派送任务的策略，轮流派送任务到每个线程的任务队列中，如果该线程的任务队列最大了，则派送到公共队列中，让其他线程帮忙处理 
     int dispatch(const int originIndex = 0){ // 派发该任务到那个线程任务队列 或者 线程池队列中
         if(config_.fair_lock_enable_){
             return -1 ;         // 默认添加到线程池的队列中
