@@ -117,6 +117,7 @@ public :
                     LOG_ERROR("WebSocket update Error");
                     return CLOSE_CONNECTION ; 
                 }  
+                return GOOD_CODE ; 
             }
             if(http_->makeHttpResponse(200) == false){// 设置 http 应答报文出错，关闭连接
                 LOG_ERROR("server make http response error !!") ; 
@@ -154,9 +155,13 @@ public :
     }
 
     STATUS_CODE dealWebSocketRequest(){
-        if(webSocket_->dealWebSocketRequest() == false){
-            LOG_ERROR("server deal parse WebSocket request error !!") ; 
-            return CLOSE_CONNECTION ;
+        STATUS_CODE ret = webSocket_->dealWebSocketRequest() ; 
+        if(ret == BAD_REQUEST) {// WebSocket 请求解析出错，直接关闭连接
+            LOG_ERROR("server deal parse WebSocket request error !!") ;   
+            return CLOSE_CONNECTION ; 
+        } else if(ret == CLOSE_CONNECTION){ // 切换成 http 连接
+            LOG_ERROR("WebSocket close !!") ;  
+            return CLOSE_CONNECTION ; 
         }
         return GOOD_CODE ;
     }

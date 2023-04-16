@@ -55,7 +55,7 @@ public :
         return true ; 
     }
 
-    bool dealWebSocketRequest(){
+    STATUS_CODE dealWebSocketRequest(){
         int Errno = -1; 
         ssize_t len = -1;
         do {
@@ -66,8 +66,8 @@ public :
                 }else if(Errno == EINTR) {// 被中断了，继续读
                     continue;
                 }else { // 对端关闭，或者 read 出错了
-                    LOG_INFO("client already close or Error!") ;
-                    return false ;
+                    LOG_INFO("client already close or read Error!") ;
+                    return CLOSE_CONNECTION ;
                 }
             }
         }while (is_ET_) ;
@@ -75,23 +75,23 @@ public :
         return paresWebSocket() ; 
     }
 
-    int dealWebSocketResponse() {
+    STATUS_CODE dealWebSocketResponse() {
         ssize_t len = -1 ; 
         do{
             len = write(fd_ , writeBuff_->BufferStart() , writeBuff_->BufferUsedSize()) ;   
             if(len < 0){
                 if(errno == EWOULDBLOCK) {// fd_缓冲区满了 EWOULDBLOCK 或者 被信号中断了，继续写，继续发送
-                    return 2 ; 
+                    return CONTINUE_CODE ; 
                 }else if(errno == EINTR){
                     continue ; 
                 } else { // 对端关闭,再写就会触发 SIGPIPE 信号 ，或者 Write 出错了
                     LOG_ERROR("Write FD Error") ;
-                    close(); return 0 ;
+                    close(); return CLOSE_CONNECTION ;
                 }
             }else {
                 writeBuff_->Retrieve(len) ; 
                 if(writeBuff_->BufferUsedSize() <= 0) { // 传输完成 , 本次 http 请求应答结束，故关闭
-                    return 1 ;
+                    return GOOD_CODE ;
                 } 
             }
         }while(is_ET_) ; 
@@ -151,11 +151,11 @@ private :
         return writeBuff_->Append(header) ; 
     }
     
-    bool paresWebSocket() {
+    STATUS_CODE paresWebSocket() {
         // WebSocket 数据包不完整
         if(readBuff_->BufferUsedSize() < 2){
             LOG_ERROR("Websocket package incomplete") ; 
-            return false ; 
+            return CLOSE_CONNECTION ; 
         }
         const char* strBegin = readBuff_->BufferStart() ; 
         int pos = 0  ;  
@@ -179,7 +179,7 @@ private :
         readBuff_->Retrieve(2) ;
         if(mask_ == 1) {
             if(readBuff_->BufferUsedSize() < 4){
-                return false ; 
+                return BAD_REQUEST ; 
             }
             for(int i = 0 ; i < 4 ; ++i){
                 masking_key_[i] = *(strBegin + pos + i) ; 
@@ -190,17 +190,17 @@ private :
 
         if(readBuff_->BufferUsedSize() < payload_length_){
             LOG_ERROR("Websocket package incomplete") ; 
-            return false ; // 数据包不完整
+            return BAD_REQUEST ; // 数据包不完整
         }
 
         if(opcode_ == 0x8){
             LOG_INFO("Websocket connect break off") ; 
-            return false ; // 断开 WeSocket 连接
+            return CLOSE_CONNECTION ; // 断开 WeSocket 连接
         }
 
         if(makeWebSocketHead(payload_length_) == false){
             LOG_ERROR("make send Websocket package head error") ; 
-            return false ; 
+            return CLOSE_CONNECTION ; 
         }
         int head_len = writeBuff_->BufferUsedSize() ; 
         strBegin = readBuff_->BufferStart() ; 
@@ -217,7 +217,7 @@ private :
         LOG_DEBUG("WebSocket Protocol, FIN %d , OPCODE %d , MASK %d , PAYLOADLEN %d , content : %s"
             , fin_ , opcode_ , mask_ , payload_length_ , std::string(writeBuff_->BufferStart() + head_len , writeBuff_->BufferUsedSize() - head_len).data() ) ;
         
-        return true ;
+        return GOOD_CODE ;
     }
 } ; 
 

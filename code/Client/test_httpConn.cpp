@@ -53,6 +53,7 @@ void test_parse_WebSocket(){
     close(fd) ;
 }
 int main(){
-    test_parse_http() ; 
+    //test_parse_http() ; 
+    test_parse_WebSocket() ;
     return 0 ; 
 }
