@@ -44,8 +44,12 @@ public:
         return 0 == epoll_ctl(epollFd_, EPOLL_CTL_DEL, fd, &ev);
     }
 
-    int Wait(int timeoutMs = -1) {
-        return epoll_wait(epollFd_, &events_[0], static_cast<int>(events_.size()), timeoutMs);
+    int Wait(int timeoutMS = -1) {
+        // epoll_wait 的等待单位是毫秒，而传递过来的单位是秒，所以要转化下
+        if(timeoutMS != -1){
+            timeoutMS = timeoutMS * 1000 ; 
+        }
+        return epoll_wait(epollFd_, &events_[0], static_cast<int>(events_.size()), timeoutMS);
     }
 
     int GetEventFd(size_t i) const {
