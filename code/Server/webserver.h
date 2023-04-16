@@ -67,15 +67,16 @@ public:
     }
 
     void Start() {
-        int timeMS = -1 ; // epoll wait timeout == -1 无事件将一直阻塞 
+        int timeS = -1 ; // 秒为单位，epoll wait timeout == -1 无事件将一直阻塞 
         if(isClose_ == false) { LOG_INFO("========== Server start =========="); }
         while(isClose_ == false){
             // 定时器，等待 timeMS 时间后，必有一个连接事件到期，如果期间它没有重新发生交互的话。
-            if(config_.timeoutMS > 0) {
-                timeMS = timer_->GetNextTick(); // 发生一次心跳
+            if(config_.timeoutS > 0) {
+                timeS = timer_->GetNextTick(); // 发生一次心跳   
             }
-            int eventCnt = epoller_->Wait(timeMS) ;
+            int eventCnt = epoller_->Wait(timeS) ;
             for(int i = 0 ; i < eventCnt ; ++i){
+                if(isClose_) break ; 
                 // 处理事件
                 int fd = epoller_->GetEventFd(i);
                 uint32_t events = epoller_->GetEvents(i);
@@ -139,8 +140,8 @@ private:
             return false;
         }
 
-        // 这个 6 表明的是完成了三次握手并处于 ESTABLISHABE 阶段等待 accept 取的队列最大个数
-        ret = listen(listenFd_, 6) ;
+        // 这个 511 表明的是完成了三次握手并处于 ESTABLISHABE 阶段等待 accept 取的队列最大个数
+        ret = listen(listenFd_, 511) ;
         if(ret < 0) {
             LOG_ERROR("Listen IP: %s  port:%d error", config_.server_IP , config_.server_port);
             close(listenFd_);
@@ -161,9 +162,8 @@ private:
     void InitEventMode_(int trigMode) {
         // EPOLLRDHUP作用： 当使用边沿触发（EPOLLET）时，EPOLLRDHUP将会在连接断开时触发一次EPOLLIN事件， 此时epoll_wait()函数将返回一个EPOLLIN事件，并且read()操作将返回一个零字节的值。
         // EPOLLONESHOT 作用： 使用EPOLLONESHOT事件类型可以避免并发问题，确保一个文件描述符在任何时候都只会被一个线程处理，防止多个线程同时对一个文件描述符进行操作。
-        this->listenEvent_ = EPOLLRDHUP ;
-        this->connEvent_ = EPOLLONESHOT | EPOLLRDHUP ;
-
+        this->listenEvent_ = 0 ;
+        this->connEvent_ = EPOLLONESHOT  ;
         switch (trigMode)
         {
         case 0 : 
@@ -195,9 +195,11 @@ private:
                     break ; 
                 }else if(errno == EINTR){ // 或者 被信号中断等待重新调用一次accept即可  
                     continue ;
-                }else { // 出错
-                    LOG_ERROR("server accept Fail");  
-                    close(listenFd_) ;   isClose_ = true ;
+                }else { // 出错 
+                    LOG_ERROR("server accept Fail , %d" , errno);  
+                    isClose_ = true ; 
+                    threadpool_->ClosePool() ; timer_->clear() ; 
+                    close(listenFd_) ;   
                     return  ;  
                 }
             } else if(userCount >= config_.server_max_fd) {
@@ -207,12 +209,11 @@ private:
             } 
             if(fd > 0){
                 // 添加客户端的 fd  
-                users_[fd].init(fd , addr , connEvent_ |= EPOLLET);
-                if(config_.timeoutMS > 0) {// 小根堆，处理超时连接，绑定关闭的回调函数
-                    timer_->add(fd, config_.timeoutMS , std::bind(&WebServer::CloseConn_, this , &users_[fd])); 
+                users_[fd].init(fd , addr , epoller_.get() , connEvent_);
+                LOG_INFO("Client[%d](%s:%d) in, userCount:%d", fd, inet_ntoa(addr.sin_addr) , ntohs(addr.sin_port) , ++userCount);
+                if(config_.timeoutS > 0) {// 小根堆，处理超时连接，绑定关闭的回调函数
+                    timer_->add(fd, config_.timeoutS , std::bind(&WebServer::CloseConn_, this , &users_[fd])); 
                 }
-                epoller_->AddFd(fd, EPOLLIN | connEvent_);
-                LOG_INFO("Client[%d](%s:%d) in, userCount:%d", fd, inet_ntoa(addr.sin_addr) , addr.sin_port , ++userCount);
             }
         } while(listenEvent_ & EPOLLET);
     }
@@ -228,13 +229,10 @@ private:
     }
 
     void CloseConn_(ClientConn* client){
-        assert(client);
-        if(client->IsClose()) return ;
-        int fd = client->GetFd() ; 
-        client->Close() ; 
-        LOG_INFO("Client[%d](%s:%d) out , userCount:%d", client->GetFd() , client->GetIP(), client->GetPort(), --userCount) ;
-        users_.erase(fd) ; 
-        epoller_->DelFd(fd);
+        assert(client); 
+        if(client->Close()){
+            LOG_INFO("Client[%d](%s:%d) out , userCount:%d", client->GetFd() , client->GetIP(), client->GetPort(), --userCount) ;
+        } 
     }
 
     void DealWrite_(ClientConn* client) {
@@ -246,30 +244,30 @@ private:
     void DealRead_(ClientConn* client){
         assert(client); 
         // 线程池处理读任务
-        threadpool_->commitTask(std::bind(&WebServer::OnRead_, this, client));
-        if(config_.timeoutMS > 0){ 
-            timer_->adjust(client->GetFd() , Clock::now() + std::chrono::seconds(config_.timeoutMS)) ; 
+        if(config_.timeoutS > 0){ // 先更新小根堆叭，避免极端情况线程异步处理的时候，主线程把 fd close 了
+            timer_->adjust(client->GetFd() , Clock::now() + std::chrono::seconds(config_.timeoutS)) ; 
         }
+        threadpool_->commitTask(std::bind(&WebServer::OnRead_, this, client));
     }
 
     // 读取客户端发送过来的消息
     void OnRead_(ClientConn* client) { 
-        bool ret = client->dealRequest();
-        if(ret == false) { 
+        STATUS_CODE ret = client->dealRequest();
+        if(ret == CLOSE_CONNECTION) { 
             LOG_INFO("Client[%d](%s:%d) out , userCount:%d", client->GetFd() , client->GetIP(), client->GetPort(), --userCount) ;
-            client->Close();  epoller_->DelFd(client->GetFd()); return ; 
+            client->Close();  return ; 
         }
         // 读完之后，同一个线程内重置EPOLLONESHOT事件： 把 client 置于可写 EPOLLOUT ，发送 response ；
         epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLOUT) ;
     }
 
     void OnWrite_(ClientConn* client) { 
-        int ret = client->dealResponse() ;
-        if(ret == 2) { // 数据没有写完，需要继续写 
+        STATUS_CODE ret = client->dealResponse() ;
+        if(ret == CONTINUE_CODE) { // 数据没有写完，需要继续写 
             epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLOUT) ; return ;
-        }else if(ret == 0 || client->IsKeepAlive() == false){ // 是否出错，或者关闭连接
+        }else if(ret == CLOSE_CONNECTION || client->IsKeepAlive() == false){ // 是否出错，或者关闭连接
             LOG_INFO("Client[%d](%s:%d) out , userCount:%d", client->GetFd() , client->GetIP(), client->GetPort(), --userCount) ;
-            client->Close();  epoller_->DelFd(client->GetFd()); return ;
+            client->Close(); return ;
         } 
         // 写完之后，同一个线程内重置EPOLLONESHOT事件： 把 client 置于可写 EPOLLIN ，接受 http request ；
         epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLIN); 

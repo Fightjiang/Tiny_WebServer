@@ -1,6 +1,7 @@
 #include "clientConn.h"
 #include <iostream>
 #include <fstream>
+#include "../Server/epoller.h"
 using namespace std ; 
 
 // 测试解析 http request and response 
@@ -20,7 +21,8 @@ void test_parse_http(){
     struct sockaddr_in addr_ = {0} ; 
  
     ClientConn* client = new ClientConn() ; 
-    client->init(fd ,  addr_ , false) ; 
+    Epoller* epoller_ = new Epoller() ; 
+    client->init(fd ,  addr_ , epoller_ , 0) ; 
     int ret = client->dealRequest() ;
     
     while(client->dealResponse() == 2) ;  
@@ -42,7 +44,8 @@ void test_parse_WebSocket(){
     struct sockaddr_in addr_ = {0} ; 
  
     ClientConn* client = new ClientConn() ; 
-    client->init(fd ,  addr_ , false) ; 
+    Epoller* epoller_ = new Epoller() ; 
+    client->init(fd ,  addr_ , epoller_ , 0) ; 
     int ret = client->dealRequest() ;  
     client->dealResponse() ; 
     

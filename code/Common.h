@@ -45,7 +45,7 @@ struct ConfigInfo{
     // const char *server_IP = "127.0.0.1" ;                         // 服务器 Ip  
     const char *server_IP = "172.19.103.50" ;                        // 服务器 Ip  
     int server_port = 8080 ;                                         // 服务器端口
-    int timeoutMS =  60 * 60 * 2 ;                                    // 是否超时断开不活跃连接
+    int timeoutS =  60 * 5 ;                                        // 是否超时断开不活跃连接，单位时间是秒
     //int timeoutMS = -1 ;                                               // 是否超时断开不活跃连接
     int server_max_fd = 4000 ;                                       // 服务器最大连接数量，因为我的一个进程能打开 file fd 默认设置最大只有 4096 ，再保留 96 个，可能用于其他用途，如 open                                              
     bool openLog = true ;                                            // 默认打开日志
@@ -57,7 +57,7 @@ struct ConfigInfo{
 
 struct HttpConfigInfo { 
     
-    const char *srcDir = "/home/lec/File/Tiny_ChatRoom/resources" ;  // 服务器文件所在的地址
+    const char *srcDir = "/home/lec/File/Tiny_WebServer/resources" ;  // 服务器文件所在的地址
     
     std::unordered_map<std::string, std::string> SUFFIX_TYPE = {
         { ".html",  "text/html" },
@@ -99,6 +99,10 @@ struct HttpConfigInfo {
             {"/register.html", 0}, {"/login.html", 1},  
     };
 } ; 
+
+enum STATUS_CODE {
+    GOOD_CODE , BAD_REQUEST , CONTINUE_CODE , CLOSE_CONNECTION
+} ;
 
 // 自旋锁
 template<typename T> 

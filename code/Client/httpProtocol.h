@@ -123,8 +123,8 @@ public :
     bool paresRequestLine(){
         const char* strBegin = readBuff_->BufferStart() ; 
         int i = 0 , flag = 0 , len = readBuff_->BufferUsedSize() ;  
-        for(; i < len ; ++i) {
-            if((*(strBegin + i)) == '\r' && i + 1 < len &&  (*(strBegin + i + 1)) == '\n')  break ; 
+        for(; i + 1 < len ; ++i) {
+            if((*(strBegin + i)) == '\r'  &&  (*(strBegin + i + 1)) == '\n')  break ; 
             if(*(strBegin + i) == ' '){
                 ++flag ; continue ;
             }
@@ -151,8 +151,8 @@ public :
         const char* strBegin = readBuff_->BufferStart() ; 
         int i = 0 , flag = 0 , len = readBuff_->BufferUsedSize() ;  
         std::string key , value ; 
-        for(; i < len ; ++i) {
-            if((*(strBegin + i)) == '\r' && i + 1 < len &&  (*(strBegin + i + 1)) == '\n') {
+        for(; i + 1 < len ; ++i) {
+            if((*(strBegin + i)) == '\r' &&  (*(strBegin + i + 1)) == '\n') {
                 break ;
             }
             if((*(strBegin + i)) == ':'){
@@ -161,7 +161,7 @@ public :
             if(flag == 0) key.push_back(*(strBegin + i)) ; 
             if(flag == 1) value.push_back(*(strBegin + i)) ;  
         }
-        readBuff_->Retrieve(i + 2) ;  
+        readBuff_->Retrieve(i + 2) ;  // 除了最后的 "\r\n"; header 与 body 之间还有个空行
         if(flag == 0) {
             this->status_ = BODY ; return true ;
         }else if(value.size() == 0){
@@ -174,11 +174,10 @@ public :
 
     bool ParseBody() {
         status_ = FINISH ; 
-        if(header_.find("Content-Length") == header_.end()) return true ; 
+        if(readBuff_->BufferUsedSize() == 0 || header_.find("Content-Length") == header_.end()) return true ; 
         // body 数据包不完整
         if(readBuff_->BufferUsedSize() < stol(header_["Content-Length"])) return false ; 
-
-        //body_ = readBuff_->RetrieveAllToStr() ; 
+ 
         const char* strBegin = readBuff_->BufferStart() ; 
         size_t len = stol(header_["Content-Length"]) ; 
 
@@ -218,29 +217,35 @@ public :
             } ;
             ParseFromUrlencoded() ;
         }
-        readBuff_->Retrieve(len) ;  
-        LOG_DEBUG("Body:%s, len:%d", std::string(strBegin , len).data() , len);
+        readBuff_->Retrieve(len + 2) ;  
+        //LOG_DEBUG("Body:%s, len:%d", std::string(strBegin , len).data() , len);
         return true ;
     }
 
     bool parseHttpRequest() {
-        if(readBuff_->BufferUsedSize() <= 0) return false ;  
+        if(readBuff_->BufferUsedSize() <= 0){
+            LOG_ERROR("readBuff_->BufferUsedSize() <= 0") ; 
+            return false ;  
+        } 
         status_ = REQUEST_LINE ; 
         while(readBuff_->BufferUsedSize() && status_ != FINISH) {
             switch (status_)
             {
             case REQUEST_LINE:
                 if(!paresRequestLine()){
+                    LOG_ERROR("paresRequestLine Error %s" , readBuff_->BufferStart()) ; 
                     return false ;
                 } 
                 break;
             case HEADERS :
                 if(!paresHeader()){
+                    LOG_ERROR("paresHeader Error %s" , readBuff_->BufferStart()) ; 
                     return false ; 
                 }
                 break ; 
             case BODY :
                 if(!ParseBody()){
+                    LOG_ERROR("ParseBody Error %s" , readBuff_->BufferStart()) ; 
                     return false ; 
                 } 
                 break ;
@@ -251,7 +256,7 @@ public :
         return true ; 
     }
     // 需要根据请求头判断头文件是否读取完毕
-    bool dealHttpRequest(const int needRead = true){ 
+    STATUS_CODE dealHttpRequest(const int needRead = true){ 
         if(needRead == true){
             int Errno = -1; 
             ssize_t len = -1;
@@ -263,13 +268,17 @@ public :
                     }else if(Errno == EINTR) {// 被中断了，继续读
                         continue;
                     }else { // 对端关闭，或者 read 出错了
-                        LOG_INFO("client already close or Error!") ;
-                        return false ;
+                        LOG_ERROR("client already close or read Error!") ;
+                        return CLOSE_CONNECTION ;
                     }
                 }
             }while (is_ET_) ;
         }
-        return parseHttpRequest() ; 
+        if(parseHttpRequest() == false) {
+            LOG_ERROR("server deal parse http request error !!") ; 
+            return BAD_REQUEST ; 
+        } 
+        return GOOD_CODE ;
     }
     
     bool AddStateLine(){
@@ -406,18 +415,18 @@ public :
         return true ; 
     }
 
-    int dealHttpResponse() {   
+    STATUS_CODE dealHttpResponse() {   
         ssize_t len = -1 ; 
         do{
             len = writev(fd_ , write_iov_ , iovCnt_) ;   
             if(len < 0){
                 if(errno == EWOULDBLOCK) {// fd_缓冲区满了 EWOULDBLOCK 或者 被信号中断了，继续写，继续发送
-                    return 2 ; 
+                    return CONTINUE_CODE ; 
                 }else if(errno == EINTR){
                     continue ; 
                 } else { // 对端关闭,再写就会触发 SIGPIPE 信号 ，或者 Write 出错了
                     LOG_ERROR("Write FD Error") ;
-                    close(); return 0 ;
+                    close(); return CLOSE_CONNECTION ;
                 }
             }else {
                 if(static_cast<size_t>(len) > write_iov_[0].iov_len){
@@ -432,7 +441,7 @@ public :
                 }
             }
             if((write_iov_[0].iov_len <= 0)) { // 传输完成 , 本次 http 请求应答结束，故关闭
-                return 1 ;
+                return GOOD_CODE ;
             } 
         }while(is_ET_) ; 
     }
