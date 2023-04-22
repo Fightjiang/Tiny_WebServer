@@ -7,7 +7,7 @@
 * 支持Web端请求服务器**图片、视频**等文件，Web端用户**注册、登录**功能
 * 支持Web端用户在线群聊功能
  
-`注：本项目学习来源markparticle作者编写的WebServer代码收获很多，另外本项目减少了大量的string，Buffer深拷贝，并在部分地方采用了线程池自动扩缩容优化、std::move等，目前在相同环境 Webbench 压测的QPS是原作者的两倍以上。`
+`注：本项目的部分代码学习来源markparticle作者编写的WebServer代码收获很多，另外本项目减少了大量的string，Buffer深拷贝，并在部分地方采用了线程池自动扩缩容优化、std::move等，目前在相同环境 Webbench 压测的QPS是原作者的两倍以上。并在原项目的基础上增加了 JWT 认证、WebSocket 协议解析、Web端在线群聊等功能`
 
 
 ### 项目演示图片
