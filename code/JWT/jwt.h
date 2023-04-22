@@ -16,7 +16,7 @@
 #include <openssl/pem.h>  // hmacSha256
 
 #include "../Log/log.h"
-#include "../Common.h"
+#include "../Common/commonConfig.h"
 #include "../Common/picojson.h"
 
 // JWT 类

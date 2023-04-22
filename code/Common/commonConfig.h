@@ -2,20 +2,14 @@
 #define THREAD_POOL_COMMON_H
 
 #include <thread>
-#include <mutex>
-#include <atomic>
-#include <future>
-#include <memory>
-#include <functional>
-#include <queue>
-#include <vector>
-#include <list> 
-#include <algorithm>
+#include <functional> 
 #include <unordered_map>
 #include <unordered_set>
-#include <assert.h>
-#include <iostream>
-#include "./Log/log.h"
+#include <string>
+#include <list>
+#include <vector>
+#include <assert.h> 
+#include "../Log/log.h"
 
 #define SLEEP_MILLISECOND(ms)        \
     std::this_thread::sleep_for(std::chrono::milliseconds(ms)); 
@@ -45,11 +39,11 @@ struct ConfigInfo{
     // const char *server_IP = "127.0.0.1" ;                         // 服务器 Ip  
     const char *server_IP = "172.19.103.50" ;                        // 服务器 Ip  
     int server_port = 8080 ;                                         // 服务器端口
-    int timeoutS =  60 * 5 ;                                        // 是否超时断开不活跃连接，单位时间是秒
-    //int timeoutMS = -1 ;                                               // 是否超时断开不活跃连接
+    //int timeoutS =  60 * 5 ;                                        // 是否超时断开不活跃连接，单位时间是秒
+    int timeoutS = -1 ;                                               // 是否超时断开不活跃连接
     int server_max_fd = 4000 ;                                       // 服务器最大连接数量，因为我的一个进程能打开 file fd 默认设置最大只有 4096 ，再保留 96 个，可能用于其他用途，如 open                                              
     bool openLog = true ;                                            // 默认打开日志
-    int logLevel = 3 ;                                               // 日志信息级别
+    int logLevel = 0 ;                                               // 日志信息级别
     bool logWriteMethod = false ;                                    // true 异步写入，false 同步写入
     bool optLinger = true ;                                          // 优雅关闭：close() 之后等待一定时间，等套接字发送缓冲区中的数据发送完成
     int trigMode = 3 ;                                               // 采用的触发模式，0 水平触发；1 客户端 ET 服务端 LT ; 2  客户端 LT 服务端 ET; 3 客户端 ET 服务端 ET ; default = 3 ; 
@@ -58,6 +52,8 @@ struct ConfigInfo{
 struct HttpConfigInfo { 
     
     const char *srcDir = "/home/lec/File/Tiny_WebServer/resources" ;  // 服务器文件所在的地址
+    const char* jwtSecret = "Chatroom" ;                             // JWT 中的密钥设置
+    int jwtExpire = 60*60   ;                                        // JWT 中的 token 过期时间 1 小时 , 单位是秒
     
     std::unordered_map<std::string, std::string> SUFFIX_TYPE = {
         { ".html",  "text/html" },
@@ -103,107 +99,5 @@ struct HttpConfigInfo {
 enum STATUS_CODE {
     GOOD_CODE , BAD_REQUEST , CONTINUE_CODE , CLOSE_CONNECTION
 } ;
-
-// 自旋锁
-template<typename T> 
-class atomicQueue {
-private : 
-    std::queue<T> queue_ ; 
-    std::atomic<bool> flag_ ; 
-
-public : 
-    atomicQueue() : flag_(false) {} ; 
-    
-    void lock(){
-        bool expect = false ; 
-        while(flag_.compare_exchange_weak(expect , true) == false){
-            expect = false ; // 执行失败时expect结果是未定的
-        }
-        // 这里的 flag_ 已经是 true ; 故其他线程在上面的循环永远都会是 false , 进而操作不了队列
-    }
-    
-    void unlock() {
-        flag_.store(false) ; 
-    }
-
-    bool empty(){
-        lock() ; 
-        if(queue_.empty()) {
-            unlock() ; 
-            return true ;
-        } ; 
-        unlock() ; 
-        return false ;
-    }
-
-    size_t size(){
-        lock() ; 
-        size_t size = queue_.size() ; 
-        unlock() ; 
-        return size ;
-    }
-
-    bool tryPop(T& task) {
-        lock() ; 
-        if(queue_.empty()){
-            unlock() ; // 一定要记得解锁
-            return false ;
-        } 
-        task = std::move(queue_.front()) ; queue_.pop() ;  
-        unlock() ; 
-        return true ;
-    }
-
-    // 添加只会有主线程一个添加，但是会有其他线程在取队列，故也要加锁
-    void push(T&& tast){
-        lock() ; 
-        queue_.push(std::move(tast)) ;
-        unlock() ; 
-    }
-
-    void push(const T&& tast){
-        lock() ; 
-        queue_.push(std::move(tast)) ;
-        unlock() ; 
-    }
-} ;
-
-// 互斥锁  实现的线程安全队列
-// template<typename T> 
-// class atomicQueue {
-// private : 
-//     std::queue<T> queue_ ; 
-//     std::mutex mtx ;  
-
-// public : 
-     
-//     bool empty(){
-//         std::unique_lock<std::mutex> locker(mtx) ;
-//         return queue_.empty() ;  
-//     }
-
-//     size_t size(){
-//         std::unique_lock<std::mutex> locker(mtx) ;
-//         return queue_.size() ;  
-//     }
-
-//     bool tryPop(T& task) { 
-//         std::unique_lock<std::mutex> locker(mtx) ; 
-//         if(queue_.empty()) return false ;  
-//         task = std::move(queue_.front()) ; queue_.pop() ;  
-//         return true ;
-//     }
-
-//     // 添加只会有主线程一个添加，但是会有其他线程在取队列，故也要加锁
-//     void push(T&& tast){ 
-//         std::unique_lock<std::mutex> locker(mtx) ;
-//         queue_.push(std::move(tast)) ;  
-//     }
-
-//     void push(const T&& tast){ 
-//         std::unique_lock<std::mutex> locker(mtx) ;
-//         queue_.push(std::move(tast)) ;  
-//     }
-// } ; 
 
 #endif

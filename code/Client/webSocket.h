@@ -3,49 +3,53 @@
 
 #include <string>
 #include <arpa/inet.h>    //for ntohl
+#include <openssl/sha.h>
+#include <mutex>
 #include "base64.h"
-#include "sha1.h"
 #include "../Buffer/buffer.h"
 #include "../Log/log.h"
-#include "../Common.h"
+#include "../Common/commonConfig.h"
+#include "../Common/picojson.h" 
+#include "../Common/lockList.h"
 
 #define MAGIC_KEY "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 class WebSocket{
 public : 
-    WebSocket(Buffer* read , Buffer* write , const int fd , const int isET) {
-        fd_ = fd ; 
-        is_ET_ = isET ;
-        readBuff_ = read ; 
-        writeBuff_ = write ; 
+    WebSocket(const int fd , const int isET ,  Buffer* read , Buffer* write) :
+     fd_(fd) , is_ET_(isET) , readBuff_(read) , writeBuff_(write) , is_Close_(false) {
+        
     }
 
     ~WebSocket() {
         close() ; 
     }
     
-    void init(){
-        is_Close_ = false ;   
-        fin_ = 0 ; opcode_ = 0 ; mask_ = 0 ; payload_length_ = 0 ; 
+    void init(){ 
+        fin_ = 0 ; opcode_ = 0 ; mask_ = 0 ; payload_length_ = 0 ; responseName = "" ;
         memset(masking_key_ , 0 , sizeof(masking_key_)) ;
     }
 
-    void close(){
-        if(is_Close_) return ;
+    void close(){ 
+        if(is_Close_ == true) return ; 
+        std::unique_lock<std::mutex> locker(mtx_) ; 
+        if(is_Close_ == false){
+            messageList.clear() ; 
+        }
         is_Close_ = true ;
+    }
+
+    bool is_Close() {
+        std::unique_lock<std::mutex> locker(mtx_) ; 
+        return is_Close_ ; 
     }
     
     // 获得握手需要的报文信息
     bool handshark(std::string WebSocket_key) {
-        WebSocket_key += MAGIC_KEY ; // 
-
-        SHA1 sha1 ; sha1.Reset() ; 
-        sha1 << WebSocket_key.data() ; 
-        unsigned int message_digest[5] ;
-        sha1.Result(message_digest);
-        for (int i = 0; i < 5; i++) {
-            message_digest[i] = htonl(message_digest[i]);
-        }
-        WebSocket_key = base64_encode(reinterpret_cast<const unsigned char*>(message_digest),20);
+        WebSocket_key += MAGIC_KEY ; // WebSocket 协议的规定，toBase64( sha1( Sec-WebSocket-Key + 258EAFA5-E914-47DA-95CA-C5AB0DC85B11 )  )
+        
+        unsigned char message_digest[SHA_DIGEST_LENGTH];
+        SHA1(reinterpret_cast<const unsigned char *>(WebSocket_key.data()), WebSocket_key.size(), message_digest);
+        WebSocket_key = base64_encode(reinterpret_cast<const unsigned char*>(message_digest) , SHA_DIGEST_LENGTH);
         
         writeBuff_->Append("HTTP/1.1 " + std::to_string(101) + " " + "Switching Protocols" + "\r\n") ; 
         writeBuff_->Append("Connection: upgrade\r\n");
@@ -66,7 +70,6 @@ public :
                 }else if(Errno == EINTR) {// 被中断了，继续读
                     continue;
                 }else { // 对端关闭，或者 read 出错了
-                    LOG_INFO("client already close or read Error!") ;
                     return CLOSE_CONNECTION ;
                 }
             }
@@ -75,7 +78,21 @@ public :
         return paresWebSocket() ; 
     }
 
-    STATUS_CODE dealWebSocketResponse() {
+    void makeWebSocketResponse(std::string &message){
+        messageList.push_back(message) ; 
+    }
+
+    void makeWebSocketResponse(std::string &&message){
+        messageList.push_back(std::move(message)) ; 
+    }
+
+    STATUS_CODE dealWebSocketResponse() {  
+        // 如果 writeBuff 本来就还有数据，则先写之前的数据，比如握手等
+        if(writeBuff_->BufferUsedSize() <= 0){
+            std::string message ; 
+            if(messageList.tryPop(message) == false) return GOOD_CODE ; 
+            writeBuff_->Append(message) ; 
+        }
         ssize_t len = -1 ; 
         do{
             len = write(fd_ , writeBuff_->BufferStart() , writeBuff_->BufferUsedSize()) ;   
@@ -90,44 +107,15 @@ public :
                 }
             }else {
                 writeBuff_->Retrieve(len) ; 
-                if(writeBuff_->BufferUsedSize() <= 0) { // 传输完成 , 本次 http 请求应答结束，故关闭
-                    return GOOD_CODE ;
+                if(writeBuff_->BufferUsedSize() <= 0) { // 传输完成 , 本次 websocket 请求应答结束，故关闭
+                    if(messageList.empty()) return GOOD_CODE ; 
+                    return CONTINUE_CODE ; // 消息队列中还有数据，要接着写
                 } 
             }
         }while(is_ET_) ; 
     }
 
-private :
-    int fd_ ; 
-    int is_ET_ ; 
-    bool is_Close_ ; 
-    uint8_t fin_ ;                          // 1 个 bit 位
-    uint8_t opcode_ ;                       // 4 个 bit 位
-    uint8_t mask_ ;                         // 1 个 bit 位
-    uint8_t masking_key_[4] ;               // masking-key 4 个字节
-    uint64_t payload_length_ ;              // 最大 7 , 16 , 64 位 
-    
-    Buffer* readBuff_;                      // 读缓冲区
-    Buffer* writeBuff_;                     // 写缓冲区
-      
-    enum WSFrameType {
-        ERROR_FRAME=0xFF00,
-        INCOMPLETE_FRAME=0xFE00,
-
-        OPENING_FRAME=0x3300,
-        CLOSING_FRAME=0x3400,
-
-        INCOMPLETE_TEXT_FRAME=0x01,
-        INCOMPLETE_BINARY_FRAME=0x02,
-
-        TEXT_FRAME=0x81,
-        BINARY_FRAME=0x82,
-
-        PING_FRAME=0x19,
-        PONG_FRAME=0x1A
-    };
-
-    bool makeWebSocketHead(const uint64_t len){
+    std::string makeWebSocketHead(const size_t len) const{
         std::string header ; 
         header.push_back((char) TEXT_FRAME) ; 
         if(len <= 125) {
@@ -148,8 +136,49 @@ private :
                 header.push_back((char)((len >> 8*i) & 0xFF));
             }
         }
-        return writeBuff_->Append(header) ; 
+        return header ; 
     }
+
+    const std::string &getResponseName() const{
+        return responseName;
+    }
+    
+    int GetFd() const {
+        return fd_;
+    } 
+
+private :
+    int fd_ ; 
+    int is_ET_ ; 
+    std::atomic<bool> is_Close_ ; 
+    uint8_t fin_ ;                          // 1 个 bit 位
+    uint8_t opcode_ ;                       // 4 个 bit 位
+    uint8_t mask_ ;                         // 1 个 bit 位
+    uint8_t masking_key_[4] ;               // masking-key 4 个字节
+    uint64_t payload_length_ ;              // 最大 7 , 16 , 64 位 
+    
+    Buffer* readBuff_;                      // 读缓冲区
+    Buffer* writeBuff_;                     // 写缓冲区
+    std::string responseName ;              // 发送方名字
+    atomicList<std::string> messageList ;    // 消息缓冲区
+    std::mutex mtx_ ; 
+
+    enum WSFrameType {
+        ERROR_FRAME=0xFF00,
+        INCOMPLETE_FRAME=0xFE00,
+
+        OPENING_FRAME=0x3300,
+        CLOSING_FRAME=0x3400,
+
+        INCOMPLETE_TEXT_FRAME=0x01,
+        INCOMPLETE_BINARY_FRAME=0x02,
+
+        TEXT_FRAME=0x81,
+        BINARY_FRAME=0x82,
+
+        PING_FRAME=0x19,
+        PONG_FRAME=0x1A
+    };
     
     STATUS_CODE paresWebSocket() {
         // WebSocket 数据包不完整
@@ -198,25 +227,42 @@ private :
             return CLOSE_CONNECTION ; // 断开 WeSocket 连接
         }
 
-        if(makeWebSocketHead(payload_length_) == false){
-            LOG_ERROR("make send Websocket package head error") ; 
-            return CLOSE_CONNECTION ; 
-        }
-        int head_len = writeBuff_->BufferUsedSize() ; 
+        std::string content = "" ; 
         strBegin = readBuff_->BufferStart() ; 
         if(mask_ == 0){
-            writeBuff_->Append(strBegin , payload_length_) ; 
+            content = std::string(strBegin , payload_length_) ;  
         }else {
             for(int i = 0 ; i < payload_length_ ; ++i){ 
                 char ch = strBegin[i] ^ masking_key_[i % 4] ;  
-                writeBuff_->Append(&ch , 1) ;
+                content.push_back(ch) ; 
             }
         }
         readBuff_->Retrieve(payload_length_) ;
+
+        // 解析客户端发送过来的数据 , json 格式
+        picojson::value value_;   
+        std::string err = picojson::parse(value_, content);  // 解析JSON字符串，出错时err不为空
         
+        if (!err.empty()) {
+            LOG_ERROR("picojson parse error %s" , content.data()) ; 
+            return CLOSE_CONNECTION ; 
+        }
+        
+        // 从JSON对象中取出 name 和 message 的值 ,并设置推送消息格式
+        picojson::object message_json ; 
+        responseName = value_.get("toName").to_str() ; 
+        message_json["isSystem"] = picojson::value(false) ; 
+        message_json["fromName"] = picojson::value(responseName) ; 
+        message_json["message"] = picojson::value(value_.get("message").to_str() ) ; 
+        // 将 picojson 对象转换为字符串
+        std::string resContent = picojson::value(message_json).serialize(); 
+        writeBuff_->Append(makeWebSocketHead(resContent.size())) ; 
+        if(writeBuff_->Append(resContent) == false){
+            LOG_ERROR("writeBuff append response websocket Content") ; 
+            return CLOSE_CONNECTION ; 
+        }  
         LOG_DEBUG("WebSocket Protocol, FIN %d , OPCODE %d , MASK %d , PAYLOADLEN %d , content : %s"
-            , fin_ , opcode_ , mask_ , payload_length_ , std::string(writeBuff_->BufferStart() + head_len , writeBuff_->BufferUsedSize() - head_len).data() ) ;
-        
+            , fin_ , opcode_ , mask_ , resContent.size() , value_.get("message").to_str().data()) ;
         return GOOD_CODE ;
     }
 } ; 

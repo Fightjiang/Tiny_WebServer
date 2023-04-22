@@ -132,6 +132,11 @@ public:
         return str;
     }
 
+    void RefRetrieveAllToStr(std::string &str){
+        str = std::string(BufferStart(), BufferUsedSize());
+        clear();
+    }
+
 private:
     
     std::unique_ptr<char[]> buffer_   ;

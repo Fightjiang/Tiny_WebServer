@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+     <meta charset="UTF-8">
+     <title>MARK-欢迎</title>
+     <link rel="icon" href="images/favicon.ico">
+     <link rel="stylesheet" href="css/bootstrap.min.css">
+     <link rel="stylesheet" href="css/animate.css">
+     <link rel="stylesheet" href="css/magnific-popup.css">
+     <link rel="stylesheet" href="css/font-awesome.min.css">
+     <!-- Main css -->
+     <link rel="stylesheet" href="css/style.css">
+
+</head>
+
+<script src="js/jquery.js"></script>
+<script src="js/bootstrap.min.js"></script>
+<script src="js/smoothscroll.js"></script>
+<script src="js/jquery.magnific-popup.min.js"></script>
+<script src="js/magnific-popup-options.js"></script>
+<script src="js/wow.min.js"></script>
+<script src="js/custom.js"></script>
+
+<body data-spy="scroll" data-target=".navbar-collapse" data-offset="50">
+
+     <!-- PRE LOADER -->
+     <div class="preloader">
+          <div class="spinner">
+               <span class="spinner-rotate"></span>
+          </div>
+     </div>
+
+
+     <!-- NAVIGATION SECTION -->
+     <div class="navbar custom-navbar navbar-fixed-top" role="navigation">
+          <div class="container">
+               <div class="navbar-header">
+                    <button class="navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse">
+                         <span class="icon icon-bar"></span>
+                         <span class="icon icon-bar"></span>
+                         <span class="icon icon-bar"></span>
+                    </button>
+                    <!-- lOGO TEXT HERE -->
+                    <a href="/" class="navbar-brand">Mark</a>
+               </div>
+
+               <div class="collapse navbar-collapse">
+                    <ul class="nav navbar-nav navbar-right">
+                         <li><a class="smoothScroll" href="/">首页</a></li>
+                         <li><a class="smoothScroll" href="/picture">图片</a></li>
+                         <li><a class="smoothScroll" href="/video">视频</a></li>
+                         <li><a class="smoothScroll" href="/login">登录</a></li>
+                         <li><a class="smoothScroll" href="/register">注册</a></li>
+                         <li><a class="smoothScroll" href="/websocket"> WebSocket</a></li>
+                    </ul>
+               </div>
+
+          </div>
+     </div>
+     <!-- HOME SECTION -->
+     <style>
+        #mes_left{
+            float: left;
+            border: 2px aqua;
+            max-width: 490px;
+            /* background-image: url(data:image/jpeg;base64,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); */
+        }
+        #mes_right{
+            float: right;
+            border: 2px aqua;
+            max-width: 490px;
+            /* background-image: url(data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/4QBoRXhpZgAATU0AKgAAAAgABAEaAAUAAAABAAAAPgEbAAUAAAABAAAARgEoAAMAAAABAAIAAAExAAIAAAASAAAATgAAAAAAAABgAAAAAQAAAGAAAAABUGFpbnQuTkVUIHYzLjUuMTAA/9sAQwAHBQUGBQQHBgUGCAcHCAoRCwoJCQoVDxAMERgVGhkYFRgXGx4nIRsdJR0XGCIuIiUoKSssKxogLzMvKjInKisq/9sAQwEHCAgKCQoUCwsUKhwYHCoqKioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKioq/8AAEQgAMgAyAwEiAAIRAQMRAf/EAB8AAAEFAQEBAQEBAAAAAAAAAAABAgMEBQYHCAkKC//EALUQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+v/EAB8BAAMBAQEBAQEBAQEAAAAAAAABAgMEBQYHCAkKC//EALURAAIBAgQEAwQHBQQEAAECdwABAgMRBAUhMQYSQVEHYXETIjKBCBRCkaGxwQkjM1LwFWJy0QoWJDThJfEXGBkaJicoKSo1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoKDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uLj5OXm5+jp6vLz9PX29/j5+v/aAAwDAQACEQMRAD8A8wre0/w55qLLqM62ysMrEWAdh+PSl8M6fFLMbu5K7YziNT3b1/CqniRLq98UA2SlhHGobnA55FdbajHmZwxTnLlRtm78NabDGhs/tEwchmVfMGD0znvn0pqahoN3fCH+z0RcHcWiKY4745/KuUVtTtdSFtJCvmxHmN+317Gp5dTthGZXUSXPJJVsh1PUH1rP2rZt7GKOi1LwxHIv2jRg20jPks4b64b+h/OuZZWRyrqVZTggjBBrZ0PWftFwkA8xImTpu7gVJr1kpX7UhzJ0cZ5I9a0umtDJxcWYVFFFBJ1WlKkOmQASYyoYjZnk81aukuLHTP7YFtDeW6zJEFmyu4555H8PQemaz9NmR9PhO45C7T+HFa1rrk9iwSZ3vLJU+WyaVUCsDncMjJI64H41riYRVHmS7E4KbliOWT7nPePtPvbm8j1trWSyF3GpkgkYEbl4BBHTjHBrn49GkfRLnUpn2tBgtFj76k4GD/e749K63xb4gtdTtp4LeRismGVyOmDnpWBq2pXd74ZsdPjG2GCTdHDEnzSN/ebHLH+VeXBuyR7E4wu35EXhKKObVCRnMKMwY+hwAPz5rrJ7bzYXTfu3Ag5yKwfC+nNZvcPPJHvdQDGnJjOehPTPsOlb0zLFA8m/hVJ/SvXo0oundnhV6slU5UcjRRRXPY3Luk3giYwSHCscqfetfULXOlR3TXIhZ2ZYfLILHHDkjsO3PJPSuXqeC5aPzd5ZjIQdxOcEDFa+0fJyEKmvac5myyQWJlRZnkkTHytjoeuPepLaa9vi4ib7LbOMyFG5KjtnrVMabPd30gcrCjMSZGPQf1NbF0i29pHBAUlbABVT8pPqSOwrljDW53c+lrl/RWxvymyDAWPjsPSpdVnVF8iNsk8tz0HpVFLloowEYvJjBkIwB7AdhUGSxJJyT1JrpU2o8py1IwlJS6hRS0VAiKiiikUKKUUUUxC0ooooAKKKKQH/2Q==); */
+        }
+     </style>
+     <section id="home">
+        <div id = "container" style="margin: auto; width: 65em;">
+            <div id="username" style="width: 10em; height: 1em ;font-size: 2em;">
+                <h3>用户：张三<span>-在线</span></h3>
+            </div>
+            <div id="Inchat" style="text-align: center;  background-color: rgb(84, 87, 87);  height: 3em; font-size: 1em;margin-top: 2px; color: rgb(78, 232, 243);"></div>
+            <div id = "container2" style="border-left-style: solid; border-bottom-style: solid; border-width: 2px; border-color: rgb(105, 103, 103); height: 55em;">
+                <div id="left" style="float: left; width: 70%; height: 100%; border-right-style:solid ; border-width: 2px; border-color: rgb(105, 103, 103);">
+                    <div id="content" style="height: 65%;"> </div>
+                    <div id="content" style="height: 35%; border-top-style: solid; border-width: 2px; border-color: rgb(105, 103, 103); ">
+                        <textarea type="text" id="input_text" onkeyup="if(event.keyCode==13){SendMessage()}"  style="outline:none; height: 80%; padding: 2px; border: none; width: 100%;  font-size: 1.5em;"></textarea>
+                        <button id="submit" onclick="SendMessage()" style="z-index: 1; float: right; width: 6em; height: 3em; font-size: 1.2em; background-color: rgb(178, 208, 211);">发送</button>
+                    </div> 
+                </div>
+                <div id="right" style="display: inline-block; width: 30%;height: 100%;border-right-style:solid ; border-width: 2px; border-color: rgb(105, 103, 103); ">
+                    <p id="hy" style="text-align: center; color: rgb(106, 146, 221);font-size: 1.5em;margin: 5px 0 5px 0;">好友列表</p>
+                    <div id="hyList" style="height: 25em; overflow-y: scroll; background: rgb(239, 240, 234); border-top-style:solid ; border-width: 2px; "> </div>
+                     <p id="xt" style="text-align: center; color: rgb(106, 146, 221);font-size: 1.5em; margin: 5px 0 5px 0 ;">系统消息</p>
+                    <div id="xtList" style="height: 25em; overflow-y: scroll; background: rgb(239, 240, 234); border-top-style:solid ; border-width: 2px; "> </div>
+                </div> 
+            </div>
+        </div>
+     </section>
+     <!-- SCRIPTS -->
+     <script>
+        var toName , username , ws ; 
+        $(function () {
+            $.ajax({
+                url:"getUsername",
+                success:function (res) { 
+                    username = JSON.parse(res).name;
+                    toName = username // 没有好友，就默认先给自己发
+                },
+                async:false //同步请求，只有上面好了才会接着下面
+            });
+            if(username.length == 0){
+                alert("请先登录!!!")
+                window.location.href ="login.html";
+                return ; 
+            } 
+            //建立websocket连接
+            //获取host解决后端获取httpsession的空指针异常
+            var host = window.location.host; 
+            ws = new WebSocket("ws://"+host);
+            ws.onopen = function (evt) {
+                $("#username").html("<h3 style=\"text-align: center;\">用户："+ username +"<span>-在线</span></h3>");
+            }
+            //接受消息
+            ws.onmessage = function (evt) {
+                //获取服务端推送的消息
+                console.log(evt) ;
+                var dataStr = evt.data;
+                //将dataStr转换为json对象
+                var res = JSON.parse(dataStr);
+                
+                //判断是否是系统消息
+                if(res.isSystem){
+                    //系统消息
+                    //1.好友列表展示
+                    //2.系统广播的展示
+                    //此处声明的变量是调试时命名的，可以直接合并
+                    var names = res.message;
+                    var userlistStr = "";
+                    var broadcastListStr = "";
+                    var temp01 = "<a style=\"text-align: center; display: block;\" onclick='showChat(\"";
+                    var temp03 = "\")'>";
+                    var temp04 = "</a></br>";
+                    var temp = "";
+                    for (var name of names){
+                        if (name != username){
+                            temp = temp01 + name + temp03 + name + temp04;
+                            userlistStr = userlistStr + temp;
+                            broadcastListStr += "<p style='text-align: center'>"+ name +"上线了</p>";
+                        }
+                    }
+                    //渲染好友列表和系统广播
+                    $("#hyList").html(userlistStr);
+                    $("#xtList").html(broadcastListStr);
+
+                }else {
+                    //不是系统消息
+                    var str = "<span id='mes_right'>"+ res.fromName + ": " + res.message +"</span></br>";
+                    //if (toName === res.fromName) {
+                        $("#content").append(str);
+                    //}
+                    var chatData = sessionStorage.getItem(res.fromName);
+                    if (chatData != null){
+                        str = chatData + str;
+                    }
+                    //保存聊天消息
+                    sessionStorage.setItem(res.fromName,str);
+                };
+            }
+            ws.onclose = function () { 
+                $("#username").html("<h3 style=\"text-align: center;\">用户："+ username +"<span>-离线</span></h3>");
+                window.location.href ="login.html";
+            }
+        }) ;
+        //点击好友名称展示相关消息
+        function showChat(name){
+            toName = name;
+            //现在聊天框
+            $("#content").html("");
+            $("#content").css("visibility","visible");
+            $("#Inchat").html("当前正与"+toName+"聊天");
+            //从sessionStorage中获取历史信息
+            var chatData = sessionStorage.getItem(toName);
+            if (chatData != null){
+                $("#content").html(chatData);
+            }
+        }
+        
+        function SendMessage(){
+            //1.获取输入的内容
+            var data = $("#input_text").val();
+            //2.清空发送框
+            $("#input_text").val("");
+            var json = {"toName": toName ,"message": data};
+            //将数据展示在聊天区
+            var str = "<span id='mes_left'>"+ "我：" + data + "</span></br>";
+            $("#content").append(str);
+
+            var chatData = sessionStorage.getItem(toName);
+            if (chatData != null){
+                str = chatData + str;
+            }
+            sessionStorage.setItem(toName,str);
+            //3.发送数据
+            ws.send(JSON.stringify(json));
+        }
+    </script>
+</body>
+<script src="https://eqcn.ajz.miesnfu.com/wp-content/plugins/wp-3d-pony/live2dw/lib/L2Dwidget.min.js"></script>
+<script>
+    /*https://unpkg.com/live2d-widget-model-shizuku@1.0.5/assets/shizuku.model.json*/
+    L2Dwidget.init({ "model": { jsonPath:
+                "https://unpkg.com/live2d-widget-model-shizuku@1.0.5/assets/shizuku.model.json",
+            "scale": 1 }, "display": { "position": "right", "width": 110, "height": 150,
+            "hOffset": 0, "vOffset": -20 }, "mobile": { "show": true, "scale": 0.5 },
+        "react": { "opacityDefault": 0.8, "opacityOnHover": 0.1 } });
+</script>
+</html>

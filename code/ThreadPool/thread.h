@@ -1,7 +1,7 @@
 #ifndef THREAD_H
 #define THREAD_H
-#include "../Common.h"
-
+#include "../Common/commonConfig.h"
+#include "../Common/atomicQueue.h"
 class Thread{
 private : 
     int index_ ;                                      // 线程 index 

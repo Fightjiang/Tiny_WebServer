@@ -16,7 +16,8 @@
 #include "../SqlPool/sqlConnectPool.h"
 #include "../ThreadPool/threadPool.h" 
 #include "../Client/clientConn.h"
-#include "../Common.h"
+#include "../Common/commonConfig.h"
+#include "../Common/rwlockmap.h"
 
 class WebServer {
 private : 
@@ -31,7 +32,8 @@ private :
     std::unique_ptr<HeapTimer> timer_;
     std::unique_ptr<ThreadPool> threadpool_;
     std::unique_ptr<Epoller> epoller_;
-    std::unordered_map<int, ClientConn> users_; 
+    std::unordered_map<int, std::unique_ptr<ClientConn>> users_; 
+    RWLockMap<std::string , WebSocket*> userName ; // 主要用于 ChatRoom 聊天室，存储用户名对应的文件描述符，为什么不用上面的 users_ 原因是有些只是 http 连接而已。并且这个 map 要符合线程安全读多写少，故采用读写锁封装保证线程安全
 
 public:
     WebServer() : isClose_(false){
@@ -83,11 +85,11 @@ public:
                 if(fd == listenFd_) {
                     DealListen_();
                 }else if(events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR)) { 
-                    CloseConn_(&users_[fd]);  // 断开连接 
+                    CloseConn_(users_[fd].get());  // 断开连接 
                 }else if(events & EPOLLIN) { 
-                    DealRead_(&users_[fd]);   // 处理读请求
+                    DealRead_(users_[fd].get());   // 处理读请求
                 }else if(events & EPOLLOUT) { 
-                    DealWrite_(&users_[fd]);  // 处理写请求
+                    DealWrite_(users_[fd].get());  // 处理写请求
                 } else {
                     LOG_ERROR("Unexpected event");
                 }
@@ -208,11 +210,11 @@ private:
                 return ;
             } 
             if(fd > 0){
-                // 添加客户端的 fd  
-                users_[fd].init(fd , addr , epoller_.get() , connEvent_);
+                // 添加客户端的 fd   
+                users_[fd] = std::make_unique<ClientConn>(fd , addr , epoller_.get() , userName , connEvent_) ;
                 LOG_INFO("Client[%d](%s:%d) in, userCount:%d", fd, inet_ntoa(addr.sin_addr) , ntohs(addr.sin_port) , ++userCount);
                 if(config_.timeoutS > 0) {// 小根堆，处理超时连接，绑定关闭的回调函数
-                    timer_->add(fd, config_.timeoutS , std::bind(&WebServer::CloseConn_, this , &users_[fd])); 
+                    timer_->add(fd, config_.timeoutS , std::bind(&WebServer::CloseConn_, this , users_[fd].get())); 
                 }
             }
         } while(listenEvent_ & EPOLLET);
@@ -220,6 +222,7 @@ private:
     
     void SendError_(int fd, const char*info) {
         assert(fd > 0) ; 
+        Epoller::SetFdNonblock(fd) ; // 别被阻塞在这里了
         int ret = send(fd , info , strlen(info) , 0) ; 
         if(ret < 0) {
             LOG_WARN("send error to client[%d] error!", fd);
@@ -255,22 +258,16 @@ private:
         STATUS_CODE ret = client->dealRequest();
         if(ret == CLOSE_CONNECTION) { 
             LOG_INFO("Client[%d](%s:%d) out , userCount:%d", client->GetFd() , client->GetIP(), client->GetPort(), --userCount) ;
-            client->Close();  return ; 
+            client->Close(); 
         }
-        // 读完之后，同一个线程内重置EPOLLONESHOT事件： 把 client 置于可写 EPOLLOUT ，发送 response ；
-        epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLOUT) ;
     }
 
     void OnWrite_(ClientConn* client) { 
         STATUS_CODE ret = client->dealResponse() ;
-        if(ret == CONTINUE_CODE) { // 数据没有写完，需要继续写 
-            epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLOUT) ; return ;
-        }else if(ret == CLOSE_CONNECTION || client->IsKeepAlive() == false){ // 是否出错，或者关闭连接
+        if(ret == CLOSE_CONNECTION) { 
             LOG_INFO("Client[%d](%s:%d) out , userCount:%d", client->GetFd() , client->GetIP(), client->GetPort(), --userCount) ;
-            client->Close(); return ;
-        } 
-        // 写完之后，同一个线程内重置EPOLLONESHOT事件： 把 client 置于可写 EPOLLIN ，接受 http request ；
-        epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLIN); 
+            client->Close();   
+        }
     }
 };
 

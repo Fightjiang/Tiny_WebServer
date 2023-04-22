@@ -1,7 +1,7 @@
 #ifndef THREAD_POOL_H
 #define THREAD_POOL_H
 
-#include "../Common.h"
+#include "../Common/commonConfig.h"
 #include "thread.h"
 
 class ThreadPool {

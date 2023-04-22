@@ -2,12 +2,15 @@
 #define HTTP_PROTOCOL_H
 
 #include <string>
+#include <unordered_map>
 #include <fcntl.h>       // open
 #include <sys/mman.h>    // mmap, munmap
 #include "../Buffer/buffer.h"
 #include "../Log/log.h"
-#include "../Common.h"
+#include "../Common/commonConfig.h"
 #include "../SqlPool/sqlConnectPool.h"
+#include "../JWT/jwt.h"
+#include "../Common/picojson.h"
 
 class HttpProtocol{
 private : 
@@ -33,10 +36,13 @@ private :
     std::unordered_map<std::string, std::string> header_;
     std::unordered_map<std::string, std::string> post_;
     HttpConfigInfo http_config_ ; 
+    bool is_JWToken_ ;                      // 是否颁发 JWToken 
+    std::unique_ptr<JWT> Jwt_;              // JWT
 
 public : 
-    HttpProtocol(Buffer* read , Buffer* write , const int fd , const int isET) {
+    HttpProtocol(const int fd , const int isET , Buffer* read , Buffer* write) {
         http_config_ = HttpConfigInfo() ;  
+        Jwt_ = std::make_unique<JWT>(http_config_.jwtSecret , http_config_.jwtExpire) ; 
         fd_ = fd ; 
         is_ET_ = isET ;
         readBuff_ = read ; 
@@ -51,6 +57,7 @@ public :
         readBuff_->clear() ; 
         writeBuff_->clear() ; 
         is_Close_ = false ;  
+        is_JWToken_ = false ; 
         iovCnt_ = 0 ; 
         write_iov_ = nullptr ; 
         mmFile_ = nullptr ; 
@@ -105,6 +112,11 @@ public :
         
         }
         return false ; 
+    }
+    
+    std::string getUserName() {
+       std::string userName = Jwt_->parseJWT(header_["Cookie"] , "name") ;
+       return userName ;
     }
 
     std::string GetFileType_() {
@@ -268,7 +280,7 @@ public :
                     }else if(Errno == EINTR) {// 被中断了，继续读
                         continue;
                     }else { // 对端关闭，或者 read 出错了
-                        LOG_ERROR("client already close or read Error!") ;
+                        LOG_ERROR("dealHttpRequest %d client already close or read Error!" , fd_) ;
                         return CLOSE_CONNECTION ;
                     }
                 }
@@ -292,6 +304,12 @@ public :
             writeBuff_->Append("keep-alive: max=6, timeout=120\r\n");
         } else{
             writeBuff_->Append("close\r\n");
+        }
+        if(is_JWToken_){
+            std::unordered_map<std::string,std::string> keyValue ;
+            keyValue["name"] = post_["username"] ; 
+            std::string token = Jwt_->generateJWT(keyValue) ; 
+            writeBuff_->Append("Set-Cookie: " + token + "\r\n");
         }
         return writeBuff_->Append("Content-type: " + GetFileType_() + "\r\n");
     }
@@ -330,31 +348,55 @@ public :
     }
 
     bool makeHttpResponse(const int numStatus){
+        bool is_File = true ; 
+        std::string json_string ; 
         /* 判断请求的资源文件 */
         if(numStatus == 200){
-            // 判断是否是用户登录请求
+            // 处理 Post 请求,判断是否是用户登录，颁发 Token 
             if(method_ == "POST" && (path_ == "/login.html" || path_ == "/register.html") ) { 
+                is_File = false ; // 返回 json 字符串
                 if(UserVerify(post_["username"], post_["password"])) {
-                    path_ = "/welcome.html";
+                    is_JWToken_ = true ; // 在头部的 Set-Cookie 里放入 Token 
+                    json_string = R"({"status":true})"; 
                 } else {
-                    path_ = "/error.html";
+                    json_string = R"({"status":false})"; 
                 }
             }
-            std::string filePath = http_config_.srcDir + path_ ;  
-            if(stat(filePath.data(), &mmFileStat_) < 0 || S_ISDIR(mmFileStat_.st_mode)) { 
-                LOG_WARN("requests file %s Not Found" , filePath.data()) ; 
-                response_code_ = 404; // 文件不存在
-                response_status_ = "File Not Found" ; 
-                path_ = "/404.html"; 
-            }else if(!(mmFileStat_.st_mode & S_IROTH)) {
-                LOG_WARN("requests file %s Forbidden" , filePath.data()) ; 
-                response_code_ = 403; // 没有权限访问
-                response_status_ = "Forbidden" ; 
-                path_ = "/403.html"; 
-            }else { 
-                response_code_ = 200; // 成功 
-                response_status_ = "OK" ; 
+            // 处理 Get 请求，聊天界面，要验证 Token 
+            if(method_ == "GET" && path_ == "/chat.html") { 
+                if(Jwt_->judgeJWT(header_["Cookie"])) {
+                    path_ = "/chat.html";
+                }else {
+                    path_ = "/login.html";
+                }
             }
+            // 获取用户名，返回 json 内容
+            if(method_ == "GET" && path_ == "/getUsername") { 
+                is_File = false ; // 返回 json 字符串
+                std::string userName = Jwt_->parseJWT(header_["Cookie"] , "name") ; 
+                if(userName.size() > 0){
+                    json_string = R"({"name":")" + userName + R"("})";  
+                }
+            }
+
+            if(is_File == true) {
+                std::string filePath = http_config_.srcDir + path_ ;  
+                if(stat(filePath.data(), &mmFileStat_) < 0 || S_ISDIR(mmFileStat_.st_mode)) { 
+                    LOG_WARN("requests file %s Not Found" , filePath.data()) ; 
+                    response_code_ = 404; // 文件不存在
+                    response_status_ = "File Not Found" ; 
+                    path_ = "/404.html"; 
+                }else if(!(mmFileStat_.st_mode & S_IROTH)) {
+                    LOG_WARN("requests file %s Forbidden" , filePath.data()) ; 
+                    response_code_ = 403; // 没有权限访问
+                    response_status_ = "Forbidden" ; 
+                    path_ = "/403.html"; 
+                }else { 
+                    response_code_ = 200; // 成功 
+                    response_status_ = "OK" ; 
+                }
+            }
+            
         }else {
             response_code_ = 400; // 客户端请求错误
             response_status_ = "Bad Request" ; 
@@ -367,7 +409,11 @@ public :
             LOG_ERROR("server add header error !!!") ; 
             return false ; 
         } 
-        if(response_code_ == 400 || AddBody() == false) {
+        if(is_File == false) {
+            writeBuff_->Append("Content-Length: " + std::to_string(json_string.size()) + "\r\n\r\n");
+            writeBuff_->Append(json_string) ; 
+
+        }else if(is_File == true && (response_code_ == 400 || AddBody() == false))  {
              
             auto ErrorContent = [&]() -> bool {
                 std::string body; 

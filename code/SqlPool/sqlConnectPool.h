@@ -6,7 +6,7 @@
 #include <string>
 #include <semaphore.h> 
 #include "../Log/log.h"
-#include "../Common.h"
+#include "../Common/commonConfig.h"
 
 // 主连接不能用队列，直接用 vector , 再加一个hashmap visit 来判断当前 SQL 是否在使用
 // 辅助连接采用队列,
