@@ -23,6 +23,6 @@ LISTEN      0       6
 ![](./bug1-3.png)
 
 ### 三、问题解决
-最终采取的解决方案，自然是保持`close(fd);epoller_del()`和`init(fd);epoller_add（）`都是原子性执行，我最终是在 `client 类中的 init() 初始化 和 close()关闭`进行了加锁，相对于直接在主线程中互斥锁可以减少锁的粒度，不同fd客户端之间不会互斥，相同fd客户端之间才会需要互斥等待下。这样对同一个fd之间的`init()`和`Close()`都是原子性执行了。 `详细请看代码 code/Client/clientConn.h` 
+最终采取的解决方案，自然是保持`close(fd);epoller_del()`和`accept(fd);epoller_add（）`都是原子性按顺序执行，我交互了 `epoller_del(fd);close(fd);` 的顺序，这样主线程 `accept(fd)` 的时候之前的 fd 已经从 epller 中删除了，而 epoller 操作时保证线程安全的，并且 `accept()`相同文件描述符号时，也一定就是之前已经调用了 `close(fd)`。这样执行顺序就会是 ``epoller_del(fd); -> close(fd); -> accept(fd) -> epoller_add（fd）` 。`详细请看代码 code/Client/clientConn.h` 
 
 
